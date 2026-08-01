@@ -11,6 +11,7 @@
 #include "SDL3/SDL.h"
 
 #include "game_interface.h"
+#include "avp_touch_input.h"
 
 #define LOG_TAG "AVP"
 #define AVP_LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__))
@@ -142,6 +143,71 @@ int PortableKeyEvent(int state, int code, int unitcode)
     return 0;
 }
 
+// -------------------------------------------------------------------------
+// Gameplay input. The touch thread only writes these; the engine thread reads
+// them once per frame (AVP_GetTouchInput from ReadPlayerGameInput, and
+// AVP_GetTouchLook from CheckForWindowsMessages). Buttons go in as engine
+// request flags rather than synthetic keys, so rebinding controls in-game
+// cannot break them.
+// -------------------------------------------------------------------------
+
+#define ONE_FIXED 65536
+
+// Divisor, so a bigger value moves slower. touch_interface_base.cpp's left
+// stick tops out near +-15 fwd / +-10 strafe at the default sensitivity, and
+// the engine takes this as a direct speed multiplier (keyboard passes 1.0), so
+// saturate a little before the stick edge to make full speed reachable.
+#define FWD_STICK_RANGE    6.0f
+#define STRAFE_STICK_RANGE 4.0f
+
+// Look feeds the engine's mouse path. Mouse scale converts a screen-fraction
+// swipe to mouse pixels; joystick scale goes straight to a mouse velocity,
+// which saturates the turn rate at about 1024 with the default sensitivity.
+#define LOOK_MOUSE_YAW_SCALE   2500.0f
+#define LOOK_MOUSE_PITCH_SCALE 1500.0f
+#define LOOK_JOY_YAW_SCALE     100.0f
+#define LOOK_JOY_PITCH_SCALE   500.0f
+
+static volatile float s_moveStick, s_strafeStick;   // analog stick
+static volatile int s_moveDigital, s_strafeDigital; // dpad, -1/0/+1
+static volatile unsigned int s_buttons;
+
+static volatile float s_yawMouse, s_pitchMouse; // accumulated, drained per frame
+static volatile float s_yawJoy, s_pitchJoy;     // held rate
+
+static void setButton(int state, unsigned int bit)
+{
+    if (state)
+        s_buttons |= bit;
+    else
+        s_buttons &= ~bit;
+}
+
+static int clampFixed(float v)
+{
+    if (v > 1.0f) v = 1.0f;
+    if (v < -1.0f) v = -1.0f;
+    return (int)(v * ONE_FIXED);
+}
+
+extern "C" void AVP_GetTouchInput(AVP_TouchInput *out)
+{
+    out->move = s_moveDigital ? s_moveDigital * ONE_FIXED : clampFixed(s_moveStick);
+    out->strafe = s_strafeDigital ? s_strafeDigital * ONE_FIXED : clampFixed(s_strafeStick);
+    out->buttons = s_buttons;
+}
+
+extern "C" void AVP_GetTouchLook(float *yawMouse, float *pitchMouse, float *yawJoy, float *pitchJoy)
+{
+    *yawMouse = -s_yawMouse;
+    *pitchMouse = -s_pitchMouse;
+    *yawJoy = s_yawJoy;
+    *pitchJoy = s_pitchJoy;
+
+    s_yawMouse = 0.0f;
+    s_pitchMouse = 0.0f;
+}
+
 void PortableAction(int state, int action)
 {
     if (action >= PORT_ACT_MENU_UP && action <= PORT_ACT_MENU_ABORT)
@@ -159,31 +225,83 @@ void PortableAction(int state, int action)
         return;
     }
 
-    // Gameplay actions are Phase 2.
+    switch (action)
+    {
+        case PORT_ACT_ATTACK:      setButton(state, AVP_TOUCH_ATTACK); break;
+        case PORT_ACT_ALT_ATTACK:  setButton(state, AVP_TOUCH_ALT_ATTACK); break;
+        case PORT_ACT_JUMP:        setButton(state, AVP_TOUCH_JUMP); break;
+        case PORT_ACT_USE:         setButton(state, AVP_TOUCH_OPERATE); break;
+        // AVP runs by default, so these walk instead (same as :Unreal).
+        case PORT_ACT_SPEED:
+        case PORT_ACT_SPRINT:
+        case PORT_ACT_SMART_TOGGLE_RUN:
+        case PORT_ACT_ALWAYS_RUN:  setButton(state, AVP_TOUCH_WALK); break;
+        case PORT_ACT_STRAFE:      setButton(state, AVP_TOUCH_STRAFE); break;
+        case PORT_ACT_NEXT_WEP:    setButton(state, AVP_TOUCH_NEXT_WEAPON); break;
+        case PORT_ACT_PREV_WEP:    setButton(state, AVP_TOUCH_PREV_WEAPON); break;
+
+        case PORT_ACT_DOWN:
+        case PORT_ACT_CROUCH:
+            setButton(state, AVP_TOUCH_CROUCH);
+            break;
+
+        case PORT_ACT_TOGGLE_CROUCH:
+            if (state)
+                s_buttons ^= AVP_TOUCH_CROUCH;
+            break;
+
+        // Digital movement buttons; the analog stick uses PortableMove* instead.
+        case PORT_ACT_FWD:        s_moveDigital = state ? 1 : 0; break;
+        case PORT_ACT_BACK:       s_moveDigital = state ? -1 : 0; break;
+        case PORT_ACT_MOVE_RIGHT: s_strafeDigital = state ? 1 : 0; break;
+        case PORT_ACT_MOVE_LEFT:  s_strafeDigital = state ? -1 : 0; break;
+
+        // Turn buttons have no analog equivalent here, so drive the look rate.
+        case PORT_ACT_RIGHT: s_yawJoy = state ? LOOK_JOY_YAW_SCALE * 5.0f : 0.0f; break;
+        case PORT_ACT_LEFT:  s_yawJoy = state ? -LOOK_JOY_YAW_SCALE * 5.0f : 0.0f; break;
+
+        // IOFOCUS_Toggle is hardwired to this key, not rebindable.
+        case PORT_ACT_CONSOLE: queueKey(SDL_SCANCODE_GRAVE, state); break;
+    }
 }
 
 void PortableMove(float fwd, float strafe)
 {
+    PortableMoveFwd(fwd);
+    PortableMoveSide(strafe);
 }
 
 void PortableMoveFwd(float fwd)
 {
+    s_moveStick = fwd / FWD_STICK_RANGE;
 }
 
 void PortableMoveSide(float strafe)
 {
+    s_strafeStick = strafe / STRAFE_STICK_RANGE;
 }
 
 void PortableLookPitch(int mode, float pitch)
 {
+    if (mode == LOOK_MODE_JOYSTICK)
+        s_pitchJoy = pitch * LOOK_JOY_PITCH_SCALE;
+    else
+        s_pitchMouse += pitch * LOOK_MOUSE_PITCH_SCALE;
 }
 
 void PortableLookYaw(int mode, float yaw)
 {
+    if (mode == LOOK_MODE_JOYSTICK)
+        s_yawJoy = yaw * LOOK_JOY_YAW_SCALE;
+    else
+        s_yawMouse += yaw * LOOK_MOUSE_YAW_SCALE;
 }
 
 void PortableMouse(float dx, float dy)
 {
+    // A bare swipe (no virtual stick) counts as mouse-mode look.
+    s_yawMouse += dx * LOOK_MOUSE_YAW_SCALE;
+    s_pitchMouse += dy * LOOK_MOUSE_PITCH_SCALE;
 }
 
 void PortableMouseAbs(float x, float y)
@@ -192,6 +310,10 @@ void PortableMouseAbs(float x, float y)
 
 void PortableMouseButton(int state, int button, float dx, float dy)
 {
+    if (button == 1)
+        setButton(state, AVP_TOUCH_ATTACK);
+    else if (button == 2)
+        setButton(state, AVP_TOUCH_ALT_ATTACK);
 }
 
 void PortableCommand(const char *cmd)

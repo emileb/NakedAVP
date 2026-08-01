@@ -68,6 +68,7 @@ extern int AVP_PopPortableKey(int *scancode, int *press);
 extern void AVP_RestoreGLState(void);
 // -u, divides the virtual screen size to enlarge the fixed-pixel menus and HUD.
 static float UIScale = 1.0f;
+#include "avp_touch_input.h"
 #endif
 
 static bool SDLCALL SDLEventFilter(void* userData, SDL_Event* event);
@@ -1320,6 +1321,20 @@ void CheckForWindowsMessages()
 		MouseVelX = 0;
 		MouseVelY = 0;
 	}
+
+#if defined(__ANDROID__)
+	// Touch look rides the mouse path so it picks up the in-game sensitivity
+	// settings. Swipes are deltas (velocity = delta/frametime, as above); the
+	// look stick is already a rate.
+	{
+		float yawMouse, pitchMouse, yawJoy, pitchJoy;
+
+		AVP_GetTouchLook(&yawMouse, &pitchMouse, &yawJoy, &pitchJoy);
+
+		MouseVelX += DIV_FIXED((int)yawMouse, NormalFrameTime) + (int)yawJoy;
+		MouseVelY += DIV_FIXED((int)pitchMouse, NormalFrameTime) + (int)pitchJoy;
+	}
+#endif
 
 	if (GotJoystick) {
 		float numbuttons;

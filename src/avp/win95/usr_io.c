@@ -29,6 +29,10 @@
 #include "ahudgadg.hpp"
 #include "avp_menus.h"
 
+#if defined(__ANDROID__)
+#include "avp_touch_input.h"
+#endif
+
 extern int InGameMenusAreRunning(void);
 extern void AvP_TriggerInGameMenus(void);
 extern void Recall_Disc(void);
@@ -1621,6 +1625,59 @@ void ReadPlayerGameInput(STRATEGYBLOCK* sbPtr)
 	}
 	#endif
 	if (DebouncedKeyboardInput[KEY_GRAVE]) IOFOCUS_Toggle();
+
+#if defined(__ANDROID__)
+	// Touch controls, applied last so they win over a stale key state.
+	if (IOFOCUS_AcceptControls() && !InGameMenusAreRunning())
+	{
+		AVP_TouchInput touch;
+
+		AVP_GetTouchInput(&touch);
+
+		if (touch.move > 0)
+		{
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Forward = 1;
+			playerStatusPtr->Mvt_MotionIncrement = touch.move;
+		}
+		else if (touch.move < 0)
+		{
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Backward = 1;
+			playerStatusPtr->Mvt_MotionIncrement = touch.move;
+		}
+
+		if (touch.strafe > 0)
+		{
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_SideStepRight = 1;
+			playerStatusPtr->Mvt_SideStepIncrement = touch.strafe;
+		}
+		else if (touch.strafe < 0)
+		{
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_SideStepLeft = 1;
+			playerStatusPtr->Mvt_SideStepIncrement = touch.strafe;
+		}
+
+		if (touch.buttons & AVP_TOUCH_ATTACK)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_FirePrimaryWeapon = 1;
+		if (touch.buttons & AVP_TOUCH_ALT_ATTACK)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_FireSecondaryWeapon = 1;
+		if (touch.buttons & AVP_TOUCH_JUMP)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Jump = 1;
+		if (touch.buttons & AVP_TOUCH_CROUCH)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Crouch = 1;
+		if (touch.buttons & AVP_TOUCH_OPERATE)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Operate = 1;
+		if (touch.buttons & AVP_TOUCH_STRAFE)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Strafe = 1;
+		if (touch.buttons & AVP_TOUCH_NEXT_WEAPON)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_NextWeapon = 1;
+		if (touch.buttons & AVP_TOUCH_PREV_WEAPON)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_PreviousWeapon = 1;
+
+		// Default is run, so this button clears the flag rather than setting one.
+		if (touch.buttons & AVP_TOUCH_WALK)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Faster = 0;
+	}
+#endif
 }
 
 void LoadKeyConfiguration(void)
