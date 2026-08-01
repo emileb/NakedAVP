@@ -66,6 +66,8 @@ void RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_KEYDOWN(int wParam);
 extern int AVP_PopPortableKey(int *scancode, int *press);
 // opengl.c - undo the GL state the touch controls leave behind on swap.
 extern void AVP_RestoreGLState(void);
+// -u, divides the virtual screen size to enlarge the fixed-pixel menus and HUD.
+static float UIScale = 1.0f;
 #endif
 
 static bool SDLCALL SDLEventFilter(void* userData, SDL_Event* event);
@@ -602,6 +604,36 @@ static void SetWindowSize(int PhysicalWidth, int PhysicalHeight, int VirtualWidt
 	}
 }
 
+#if defined(__ANDROID__)
+// The framebuffer scaler renders at game_screen_*, which is what the game must
+// size itself to; SDL reports the window, which can be a different size.
+extern int game_screen_width;
+extern int game_screen_height;
+
+static void GetRenderSize(int *w, int *h)
+{
+	if (game_screen_width > 0 && game_screen_height > 0) {
+		*w = game_screen_width;
+		*h = game_screen_height;
+	} else if (window != NULL) {
+		SDL_GetWindowSize(window, w, h);
+	}
+}
+#endif
+
+// Hardware modes normally use the physical size as the virtual one. On Android
+// UIScale shrinks the virtual size so the fixed-pixel UI grows; the 3D view is
+// unaffected as it projects through SDB_Centre/VDB_Proj, which scale together.
+static void SetHardwareWindowSize(int PhysicalWidth, int PhysicalHeight)
+{
+#if defined(__ANDROID__)
+	SetWindowSize(PhysicalWidth, PhysicalHeight,
+	              (int)(PhysicalWidth / UIScale), (int)(PhysicalHeight / UIScale));
+#else
+	SetWindowSize(PhysicalWidth, PhysicalHeight, PhysicalWidth, PhysicalHeight);
+#endif
+}
+
 static int SetSoftVideoMode(int Width, int Height, int Depth)
 {
 	//TODO: clear surface
@@ -656,6 +688,10 @@ static int SetOGLVideoMode(int Width, int Height)
 			Height = dm->h;
 		}
 	}
+#endif
+
+#if defined(__ANDROID__)
+	GetRenderSize(&Width, &Height);
 #endif
 
 	if (window == NULL) {
@@ -754,6 +790,9 @@ static int SetOGLVideoMode(int Width, int Height)
 		load_ogl_functions(1);
 
 		SDL_GetWindowSize(window, &Width, &Height);
+#if defined(__ANDROID__)
+		GetRenderSize(&Width, &Height);
+#endif
 		pglViewport(0, 0, Width, Height);
 
 		// create fullscreen window texture
@@ -772,8 +811,11 @@ static int SetOGLVideoMode(int Width, int Height)
 	}
 
 	SDL_GetWindowSize(window, &Width, &Height);
-	
-	SetWindowSize(Width, Height, Width, Height);
+#if defined(__ANDROID__)
+	GetRenderSize(&Width, &Height);
+#endif
+
+	SetHardwareWindowSize(Width, Height);
 	
 	int NewWidth, NewHeight;
 	SDL_GetWindowSize(window, &Width, &Height);
@@ -1218,10 +1260,13 @@ void CheckForWindowsMessages()
 					//printf("test, %d,%d\n", event.window.data1, event.window.data2);
 					WindowWidth = event.window.data1;
 					WindowHeight = event.window.data2;
+#if defined(__ANDROID__)
+					GetRenderSize(&WindowWidth, &WindowHeight);
+#endif
 					if (RenderingMode == RENDERING_MODE_SOFTWARE) {
 						SetWindowSize(WindowWidth, WindowHeight, 640, 480);
 					} else {
-						SetWindowSize(WindowWidth, WindowHeight, WindowWidth, WindowHeight);
+						SetHardwareWindowSize(WindowWidth, WindowHeight);
 					}
 					if (pglViewport != NULL) {
 						pglViewport(0, 0, WindowWidth, WindowHeight);
@@ -1473,6 +1518,9 @@ static const struct option getopt_long_options[] = {
 { "debug",	0,	NULL,	'd' },
 { "withgl",	1,	NULL,	'g' },
 { "datapath",	1,	NULL,	'p' },
+#if defined(__ANDROID__)
+{ "uiscale",	1,	NULL,	'u' },
+#endif
 /*
 { "loadrifs",	1,	NULL,	'l' },
 { "server",	0,	someval,	1 },
@@ -1502,7 +1550,12 @@ int main(int argc, char *argv[])
 	int c;
 	
 	opterr = 0;
-	while ((c = getopt_long(argc, argv, "hvfwscdg:p:", getopt_long_options, NULL)) != -1) {
+#if defined(__ANDROID__)
+#define GETOPT_STRING "hvfwscdg:p:u:"
+#else
+#define GETOPT_STRING "hvfwscdg:p:"
+#endif
+	while ((c = getopt_long(argc, argv, GETOPT_STRING, getopt_long_options, NULL)) != -1) {
 		switch(c) {
 			case 'h':
 				printf("%s", usage_string);
@@ -1536,6 +1589,13 @@ int main(int argc, char *argv[])
 			case 'p':
 				gamedatapath = optarg;
 				break;
+#if defined(__ANDROID__)
+			case 'u':
+				UIScale = (float) atof(optarg);
+				if (UIScale < 1.0f) UIScale = 1.0f;
+				if (UIScale > 4.0f) UIScale = 4.0f;
+				break;
+#endif
 			default:
 				printf("%s", usage_string);
 				exit(EXIT_FAILURE);	
