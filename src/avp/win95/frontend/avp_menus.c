@@ -488,6 +488,15 @@ int InGameMenusAreRunning(void)
 {
 	return (AvPMenus.MenusState == MENUSSTATE_INGAMEMENUS);
 }
+
+#ifdef __ANDROID__
+/* Touch layer needs to know when to show the menu control set (PortableGetScreenMode). */
+int AVP_MenusAreRunning(void)
+{
+	return (AvPMenus.MenusState == MENUSSTATE_MAINMENUS ||
+	        AvPMenus.MenusState == MENUSSTATE_INGAMEMENUS);
+}
+#endif
 extern void AvP_UpdateMenus(void)
 {
 //      DrawAvPMenuGfx(AVPMENUGFX_BIG_AVP_LOGO,50,50,16384);

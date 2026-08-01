@@ -13,11 +13,26 @@ ENDIF(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 
 PROJECT(avp)
 
+IF(ANDROID)
+  # The OpenTouch wrapper module supplies SDL3 and OpenAL as prebuilt .so files,
+  # so none of the finders below apply. GL is not linked at all: the engine
+  # dlopen()s libGL4ES.so at runtime and resolves every entry point from it
+  # (src/oglfunc.c), which turns AVP's GL 1.1 fixed-function renderer into GLES2
+  # without touching the renderer itself.
+  SET(SDL3_FOUND TRUE)
+  SET(SDL3_INCLUDE ${SDL3_INCLUDE_DIR})
+  SET(OPENAL_FOUND TRUE)
+  SET(OPENGLES_FOUND TRUE)
+  SET(OPENGL_TYPE "OPENGLES2")
+ELSE()
+
 # required dependencies
 INCLUDE(FindOpenGLES2.cmake)
 INCLUDE(FindSDL3.cmake)
 INCLUDE(FindOpenGL)
 INCLUDE(FindOpenAL)
+
+ENDIF(ANDROID)
 
 IF(NOT SDL3_FOUND)
     MESSAGE(FATAL_ERROR "SDL 3.0 was requested but CMake couldn't find it.")
@@ -306,7 +321,23 @@ INCLUDE_DIRECTORIES(${include})
 # manually include src/include
 INCLUDE_DIRECTORIES(src/include)
 
+IF(ANDROID)
+  # The app loads the game as a shared library and calls main() via the JNI glue.
+  # OpenTouch glue: the JNI bridge from Clibs_OpenTouch plus AVP's own touch
+  # interface, both under mobile/.
+  LIST(APPEND source mobile/game_interface.cpp)
+  LIST(APPEND source mobile/touch_interface_avp.cpp)
+  LIST(APPEND source ${CLIBS_DIR}/sigma/android_jni.cpp)
+  LIST(APPEND source ${CLIBS_DIR}/touch_interface_base.cpp)
+  LIST(APPEND source ${CLIBS_DIR}/LogWritter.c)
+  LIST(APPEND source ${CLIBS_DIR}/fts.c)
+  LIST(APPEND source ${CLIBS_DIR}/rand.c)
+
+  ADD_LIBRARY(avp SHARED ${source})
+  SET_TARGET_PROPERTIES(avp PROPERTIES PREFIX "lib" OUTPUT_NAME "avp")
+ELSE()
 ADD_EXECUTABLE(avp ${source})
+ENDIF(ANDROID)
 
 # required dependencies
 INCLUDE_DIRECTORIES(${SDL3_INCLUDE})
@@ -329,9 +360,25 @@ IF(OPENGL_TYPE STREQUAL "OPENGL")
   TARGET_LINK_LIBRARIES(avp ${OPENGL_gl_LIBRARY})
 ENDIF(OPENGL_TYPE STREQUAL "OPENGL")
 
-IF(OPENGL_TYPE STREQUAL "OPENGLES2")
+IF(OPENGL_TYPE STREQUAL "OPENGLES2" AND NOT ANDROID)
   TARGET_LINK_LIBRARIES(avp ${OPENGLES_gl_LIBRARY})
   TARGET_LINK_LIBRARIES(avp ${EGL_LIBRARIES})
-ENDIF(OPENGL_TYPE STREQUAL "OPENGLES2")
+ENDIF(OPENGL_TYPE STREQUAL "OPENGLES2" AND NOT ANDROID)
 
+IF(ANDROID)
+  # ENGINE_NAME names the touch-control layout XML files.
+  TARGET_COMPILE_DEFINITIONS(avp PRIVATE ENGINE_NAME="avp" USE_SDL3)
+
+  # mobile/ must precede CLIBS_DIR so the shared touch_interface_base.cpp and
+  # JNI glue resolve *this* engine's touch_interface.h, not another engine's.
+  TARGET_INCLUDE_DIRECTORIES(avp PRIVATE
+    ${SDL3_INCLUDE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/mobile
+    ${CLIBS_DIR}
+    ${TOUCH_CONTROLS_DIR}
+  )
+  # libGL4ES is dlopen()ed at runtime, so only -ldl is needed for GL here.
+  TARGET_LINK_LIBRARIES(avp ${SDL3_LIBRARY} openal-soft touchcontrols saffal log dl)
+ELSE()
 TARGET_LINK_LIBRARIES(avp ${OPENAL_LIBRARY})
+ENDIF(ANDROID)

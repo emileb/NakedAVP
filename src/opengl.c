@@ -221,6 +221,29 @@ void InitOpenGL()
 	starrp = starr;
 }
 
+#if defined(__ANDROID__)
+// The touch controls draw between frames and clobber state we only set once.
+void AVP_RestoreGLState()
+{
+	pglEnable(GL_BLEND);
+	pglBlendFunc(GL_SRC_ALPHA, GL_ONE);
+
+	pglEnable(GL_DEPTH_TEST);
+	pglDepthFunc(GL_LEQUAL);
+	pglDepthMask(GL_TRUE);
+	pglDepthRange(0.0, 1.0);
+
+	pglEnable(GL_TEXTURE_2D);
+	pglDisable(GL_CULL_FACE);
+	pglDisable(GL_ALPHA_TEST);
+
+	// InitOpenGL sets filtering before binding, so don't leave the controls' texture bound.
+	pglBindTexture(GL_TEXTURE_2D, 0);
+
+	InitOpenGL();
+}
+#endif
+
 static void FlushTriangleBuffers(int backup)
 {
 	if (tarrc) {

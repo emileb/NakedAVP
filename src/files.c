@@ -643,14 +643,27 @@ void InitGameDirectories(char *argv0, char* argv_datapath)
 	SecondTex_Directory = "graphics/";
 	SecondSoundDir = "sound/";
     
+#if defined(__ANDROID__)
+	/* Config and saves must never land in the game-data folder: it may be
+	   read-only (SAF/secondary storage) and shouldn't be mixed with the original
+	   install. USER_FILES is set for every engine by the OpenTouch JNI glue. */
+	homedir = getenv("USER_FILES");
+	if (homedir == NULL)
+		homedir = ".";
+
+	localdir = (char *)malloc(strlen(homedir)+10);
+	strcpy(localdir, homedir);
+	strcat(localdir, "/avp");
+#else
 	homedir = getenv("HOME");
 	if (homedir == NULL)
 		homedir = ".";
-    
+
 	localdir = (char *)malloc(strlen(homedir)+10);
 	strcpy(localdir, homedir);
 	strcat(localdir, "/");
 	strcat(localdir, ".avp");
+#endif
 
 	tmp = NULL;
 	

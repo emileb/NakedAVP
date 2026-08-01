@@ -61,6 +61,13 @@ static inline void secure_avpzero(void* p, size_t n) {
 void RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(char Ch);
 void RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_KEYDOWN(int wParam);
 
+#if defined(__ANDROID__)
+// mobile/game_interface.cpp - touch key queue, drained in CheckForWindowsMessages.
+extern int AVP_PopPortableKey(int *scancode, int *press);
+// opengl.c - undo the GL state the touch controls leave behind on swap.
+extern void AVP_RestoreGLState(void);
+#endif
+
 static bool SDLCALL SDLEventFilter(void* userData, SDL_Event* event);
 
 char LevelName[] = {"predbit6\0QuiteALongNameActually"}; /* the real way to load levels */
@@ -226,7 +233,25 @@ unsigned char *GetScreenShot24(int *width, int *height)
 
 		pglPixelStorei(GL_PACK_ALIGNMENT, 1);
 		pglPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+#if defined(__ANDROID__)
+		// GLES only guarantees GL_RGBA for glReadPixels, so read that and pack down.
+		{
+			unsigned char *rgba = (unsigned char *)malloc(ViewportWidth * ViewportHeight * 4);
+			int i, n = ViewportWidth * ViewportHeight;
+
+			pglReadPixels(0, 0, ViewportWidth, ViewportHeight, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+			for (i = 0; i < n; i++) {
+				buf[i*3+0] = rgba[i*4+0];
+				buf[i*3+1] = rgba[i*4+1];
+				buf[i*3+2] = rgba[i*4+2];
+			}
+
+			free(rgba);
+		}
+#else
 		pglReadPixels(0, 0, ViewportWidth, ViewportHeight, GL_RGB, GL_UNSIGNED_BYTE, buf);
+#endif
 	} else {
 		buf = (unsigned char *)malloc(surface->w * surface->h * 3);
 
@@ -623,10 +648,13 @@ static int SetOGLVideoMode(int Width, int Height)
 
 #if defined(FIXED_WINDOW_SIZE)
 	// force the game to use the full desktop
-	SDL_DisplayMode dm;
-	if (SDL_GetDesktopDisplayMode(0, &dm) == 0) {
-		Width = dm.w;
-		Height = dm.h;
+	// SDL3 returns the mode by pointer, keyed on a display ID.
+	{
+		const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+		if (dm != NULL) {
+			Width = dm->w;
+			Height = dm->h;
+		}
 	}
 #endif
 
@@ -637,7 +665,8 @@ static int SetOGLVideoMode(int Width, int Height)
 
 #if defined(FIXED_WINDOW_SIZE)
 		flags |= SDL_WINDOW_BORDERLESS;
-		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+		// SDL3 dropped FULLSCREEN_DESKTOP; plain FULLSCREEN is the equivalent.
+		flags |= SDL_WINDOW_FULLSCREEN;
 #else
 		if (WantFullscreen) {
 			flags |= (WantResolutionChange != 0 ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_FULLSCREEN);
@@ -655,7 +684,13 @@ static int SetOGLVideoMode(int Width, int Height)
 		SDL_InitSubSystem(SDL_INIT_VIDEO);
 
 		// set OpenGL attributes first
-#if defined(USE_OPENGL_ES)
+#if defined(__ANDROID__)
+		// gl4es needs a real ES 2.0 context to translate GL 1.x onto; ES 1.1 is
+		// a deprecated emulation layer on modern Android.
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#elif defined(USE_OPENGL_ES)
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
 		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
@@ -676,20 +711,41 @@ static int SetOGLVideoMode(int Width, int Height)
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
 
-		window = SDL_CreateWindow("Aliens vs Predator",
-								  WindowWidth,
-								  WindowHeight,
-								  flags);
-		if (window == NULL) {
-			fprintf(stderr, "(OpenGL) SDL SDL_CreateWindow failed: %s\n", SDL_GetError());
-			exit(EXIT_FAILURE);
+		// Plenty of mobile GPUs cannot give a 4x-MSAA ES2 context; retry without
+		// it rather than killing the process on the first failure.
+		{
+			int msaa_retry = 0;
+
+			for (;;) {
+				window = SDL_CreateWindow("Aliens vs Predator",
+										  WindowWidth,
+										  WindowHeight,
+										  flags);
+
+				if (window != NULL) {
+					context = SDL_GL_CreateContext(window);
+
+					if (context != NULL)
+						break;
+
+					fprintf(stderr, "(OpenGL) SDL SDL_GL_CreateContext failed: %s\n", SDL_GetError());
+					SDL_DestroyWindow(window);
+					window = NULL;
+				} else {
+					fprintf(stderr, "(OpenGL) SDL SDL_CreateWindow failed: %s\n", SDL_GetError());
+				}
+
+				if (msaa_retry) {
+					exit(EXIT_FAILURE);
+				}
+
+				fprintf(stderr, "(OpenGL) retrying without multisampling\n");
+				SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
+				SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
+				msaa_retry = 1;
+			}
 		}
-		
-		context = SDL_GL_CreateContext(window);
-		if (context == NULL) {
-			fprintf(stderr, "(OpenGL) SDL SDL_GL_CreateContext failed: %s\n", SDL_GetError());
-			exit(EXIT_FAILURE);
-		}
+
 		SDL_GL_MakeCurrent(window, context);
 
 		// These should be configurable video options.
@@ -1179,8 +1235,23 @@ void CheckForWindowsMessages()
 		}
 	}
 	
+#if defined(__ANDROID__)
+	// Drain the touch layer's key queue (mobile/game_interface.cpp). Must run
+	// after the DebouncedKeyboardInput clear above so injected keys debounce
+	// exactly like real ones.
+	{
+		int scancode, press;
+
+		while (AVP_PopPortableKey(&scancode, &press)) {
+			SDL_Keycode sym = SDL_GetKeyFromScancode((SDL_Scancode) scancode, SDL_KMOD_NONE, false);
+
+			handle_keypress(KeySymToKey(sym), 0, press);
+		}
+	}
+#endif
+
 	buttons = SDL_GetRelativeMouseState(&x, &y);
-	
+
 	if (wantmouse) {
 		if (buttons & SDL_BUTTON_MASK(1))
 			handle_keypress(KEY_LMOUSE, 0, 1);
@@ -1283,6 +1354,10 @@ void InGameFlipBuffers()
 #endif
 
 	SDL_GL_SwapWindow(window);
+
+#if defined(__ANDROID__)
+	AVP_RestoreGLState();
+#endif
 }
 
 void FlipBuffers()
@@ -1378,6 +1453,10 @@ void FlipBuffers()
 #endif
 
 	SDL_GL_SwapWindow(window);
+
+#if defined(__ANDROID__)
+	AVP_RestoreGLState();
+#endif
 }
 
 char *AvpCDPath = 0;

@@ -6,6 +6,46 @@
 
 #include "oglfunc.h"
 
+#ifdef __ANDROID__
+#include <dlfcn.h>
+
+/*
+Android has no fixed-function GL, so every entry point below is resolved from
+gl4es (libGL4ES.so), which implements desktop GL 1.x on top of the GLES2 context
+SDL created. It is dlopen()ed rather than linked so nothing here depends on it at
+link time. SDL_GL_GetProcAddress would return the system GLES symbols instead,
+which lack glAlphaFunc/glTexEnvi(GL_COMBINE)/client-state arrays entirely.
+*/
+static void *gl4es_handle;
+
+static void *android_gl_proc(const char *name)
+{
+	if (gl4es_handle == NULL) {
+		gl4es_handle = dlopen("libGL4ES.so", RTLD_NOW | RTLD_GLOBAL);
+
+		if (gl4es_handle == NULL) {
+			fprintf(stderr, "Unable to dlopen libGL4ES.so: %s\n", dlerror());
+			return NULL;
+		}
+
+		/* gl4es is built with NO_INIT_CONSTRUCTOR, so it must be initialised
+		   explicitly, once the GL context is current. */
+		{
+			void (*initialize_gl4es)(void) = dlsym(gl4es_handle, "initialize_gl4es");
+
+			if (initialize_gl4es != NULL)
+				initialize_gl4es();
+		}
+	}
+
+	return dlsym(gl4es_handle, name);
+}
+
+#define GL_GET_PROC(name)	android_gl_proc(#name)
+#else
+#define GL_GET_PROC(name)	SDL_GL_GetProcAddress(#name)
+#endif
+
 PFNGLALPHAFUNCPROC		pglAlphaFunc;
 PFNGLBINDTEXTUREPROC		pglBindTexture;
 PFNGLBLENDFUNCPROC		pglBlendFunc;
@@ -58,7 +98,7 @@ static void dummyfunc()
 
 #define LoadOGLProc_(type, func, name) {                    \
 	if (!mode) p##func = (type) dummyfunc; else			\
-	p##func = (type) SDL_GL_GetProcAddress(#name);			\
+	p##func = (type) GL_GET_PROC(name);				\
 	if (p##func == NULL) {						\
 		if (!ogl_missing_func) ogl_missing_func = #func;	\
 	}								\

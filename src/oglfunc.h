@@ -5,7 +5,14 @@
 #include <windows.h>
 #endif
 
-#if defined(USE_OPENGL_ES)
+#if defined(__ANDROID__)
+// gl4es implements desktop GL 1.x on top of GLES2, so the desktop headers are
+// the correct declarations here even though the platform itself is GLES-only.
+// The ES headers would be missing glAlphaFunc, GL_COMBINE texenv and the
+// client-state vertex arrays that this renderer is built on.
+#include <SDL3/SDL_opengl.h>
+
+#elif defined(USE_OPENGL_ES)
 #include <SDL3/SDL_opengles.h>
 
 // OpenGL compatibility
