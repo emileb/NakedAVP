@@ -62,7 +62,8 @@ extern void PlayIntroSequence(void)
 	FlipBuffers();
 	ClearScreenToBlack();
 
-	//PlayBinkedFMV("FMVs/logos.bik");
+	PlayBinkedFMV("FMVs/logos.bik");
+	/* rebellion.smk is a 1999 release file; AvP Gold folds it into logos.bik */
 	//PlayFMV("FMVs/rebellion.smk");
 
 	StartMenuMusic();

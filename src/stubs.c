@@ -22,35 +22,7 @@ BOOL KeepMainRifFile = FALSE;
 int HWAccel = 1;
 int VideoModeNotAvailable=0;
 
-/* bink.c */
-void PlayBinkedFMV(char *filenamePtr)
-{
-/*
-	fprintf(stderr, "PlayBinkedFMV(%s)\n", filenamePtr);
-*/
-}
-
-void StartMenuBackgroundBink()
-{
-/*
-	fprintf(stderr, "StartMenuBackgroundBink()\n");
-*/
-}
-
-int PlayMenuBackgroundBink()
-{
-/*
-	fprintf(stderr, "PlayMenuBackgroundBink()\n");
-*/	
-	return 0;
-}
-
-void EndMenuBackgroundBink()
-{
-/*
-	fprintf(stderr, "EndMenuBackgroundBink()\n");
-*/
-}
+/* bink.c: PlayBinkedFMV and the menu background now live in binkfmv.c */
 
 /* alt_tab.cpp */
 void ATIncludeSurface(void * pSurface, void * hBackup)

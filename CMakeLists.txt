@@ -304,6 +304,9 @@ LIST(APPEND source src/oglfunc.c)
 LIST(APPEND source src/fmv.c)
 # libsmacker (LGPL 2.1) decodes the .smk plot movies the video screens play
 LIST(APPEND source src/libsmacker/smacker.c)
+# Bink (intros/outros, menu backdrop, music) goes through FFmpeg instead
+LIST(APPEND source src/bink.c)
+LIST(APPEND source src/binkfmv.c)
 LIST(APPEND source src/openal.c)
 LIST(APPEND source src/cdplayer.c)
 LIST(APPEND source src/menus.c)
@@ -378,9 +381,19 @@ IF(ANDROID)
     ${CMAKE_CURRENT_SOURCE_DIR}/mobile
     ${CLIBS_DIR}
     ${TOUCH_CONTROLS_DIR}
+    ${FFMPEG_INCLUDE_DIR}
   )
   # libGL4ES is dlopen()ed at runtime, so only -ldl is needed for GL here.
-  TARGET_LINK_LIBRARIES(avp ${SDL3_LIBRARY} openal-soft touchcontrols saffal log dl)
+  # FFmpeg is static and PIC, and must come after the engine objects that use
+  # it; avformat -> avcodec -> swresample/swscale -> avutil is the dependency
+  # order the linker needs.
+  TARGET_LINK_LIBRARIES(avp ${SDL3_LIBRARY} openal-soft touchcontrols saffal log dl
+    ${FFMPEG_LIBRARY_DIR}/libavformat.a
+    ${FFMPEG_LIBRARY_DIR}/libavcodec.a
+    ${FFMPEG_LIBRARY_DIR}/libswscale.a
+    ${FFMPEG_LIBRARY_DIR}/libswresample.a
+    ${FFMPEG_LIBRARY_DIR}/libavutil.a
+    z)
 ELSE()
 TARGET_LINK_LIBRARIES(avp ${OPENAL_LIBRARY})
 ENDIF(ANDROID)

@@ -124,7 +124,9 @@ static int WantMouseGrab = 1;
 
 // Additional configuration
 int WantSound = 1;
-static int WantCDRom = 0;
+/* There is no CD, but the soundtrack ships as the numbered .bik files in FMVs/
+ * (see cdplayer.c), so the "CD" player is on unless -c turns it off. */
+static int WantCDRom = 1;
 static int WantJoystick = 0;
 
 static GLuint FullscreenTexture;

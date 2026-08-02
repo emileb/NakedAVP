@@ -18,7 +18,7 @@
 #include "dynamics.h"
 #include "dynblock.h"
 #include "stratdef.h"
-#include "fmv_audio.h"
+#include "audio_stream.h"
 
 #if 0
 #define OPENAL_DEBUG
@@ -1168,175 +1168,231 @@ int LoadWavFromFastFile(int soundNum, char * wavFileName)
 	return ok;
 }
 
-/* ** FMV streaming ** */
+/* ** Streaming audio ** */
 
-/* Smacker movie audio. Kept apart from the ACTIVESOUNDSAMPLE pool: those are
- * all whole-buffer sounds, and a movie soundtrack has to be fed as it decodes.
+/* Kept apart from the ACTIVESOUNDSAMPLE pool: those are all whole-buffer
+ * sounds, while a movie soundtrack or music track has to be fed as it decodes.
  */
 
-static ALuint FMVSource;
-static ALuint FMVBuffers[FMV_SOUND_BUFFERS];
-static ALuint FMVFreeBuffers[FMV_SOUND_BUFFERS];
-static int FMVNumFreeBuffers;
-static ALenum FMVFormat;
-static int FMVRate;
-static int FMVSilence;
-static int FMVStreamOpen = 0;
-static int FMVBuffersQueued;
-
-int FMVSound_Open(int rate, int channels, int bitdepth)
+typedef struct
 {
+	ALuint source;
+	ALuint buffers[AUDIO_STREAM_BUFFERS];
+	ALuint freeBuffers[AUDIO_STREAM_BUFFERS];
+	unsigned long queuedBytes;
+	int numFreeBuffers;
+	int buffersQueued;
+	ALenum format;
+	int rate;
+	int silence;
+	int open;
+} AUDIOSTREAM;
+
+static AUDIOSTREAM AudioStreams[AUDIO_STREAM_COUNT];
+
+int AudioStream_Open(int id, int rate, int channels, int bitdepth)
+{
+	AUDIOSTREAM *s;
 	int i;
 
-	if (!SoundActivated) {
+	if (id < 0 || id >= AUDIO_STREAM_COUNT || !SoundActivated) {
 		return 0;
 	}
 
-	FMVSound_Close();
+	AudioStream_Close(id);
+	s = &AudioStreams[id];
 
 	if (bitdepth == 16) {
-		FMVFormat = (channels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
-		FMVSilence = 0;
+		s->format = (channels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
+		s->silence = 0;
 	} else {
-		FMVFormat = (channels == 2) ? AL_FORMAT_STEREO8 : AL_FORMAT_MONO8;
-		FMVSilence = 128;	/* 8 bit AL samples are unsigned, as are Smacker's */
+		s->format = (channels == 2) ? AL_FORMAT_STEREO8 : AL_FORMAT_MONO8;
+		s->silence = 128;	/* 8 bit AL samples are unsigned, as are Smacker's */
 	}
-	FMVRate = rate;
+	s->rate = rate;
 
 	alGetError();
 
-	alGenSources(1, &FMVSource);
+	alGenSources(1, &s->source);
 	if (alGetError() != AL_NO_ERROR) {
 		return 0;
 	}
 
-	alGenBuffers(FMV_SOUND_BUFFERS, FMVBuffers);
+	alGenBuffers(AUDIO_STREAM_BUFFERS, s->buffers);
 	if (alGetError() != AL_NO_ERROR) {
-		alDeleteSources(1, &FMVSource);
+		alDeleteSources(1, &s->source);
 		return 0;
 	}
 
-	/* played flat at the listener: this port never works out which video screen
-	 * is nearest, so there is nothing to pan or attenuate by */
-	alSourcei(FMVSource, AL_SOURCE_RELATIVE, AL_TRUE);
-	alSource3f(FMVSource, AL_POSITION, 0.0f, 0.0f, 0.0f);
-	alSourcei(FMVSource, AL_LOOPING, AL_FALSE);
+	/* played flat at the listener: neither a video screen nor the music has a
+	 * position in the world to pan by */
+	alSourcei(s->source, AL_SOURCE_RELATIVE, AL_TRUE);
+	alSource3f(s->source, AL_POSITION, 0.0f, 0.0f, 0.0f);
+	alSourcei(s->source, AL_LOOPING, AL_FALSE);
 
-	for (i = 0; i < FMV_SOUND_BUFFERS; i++) {
-		FMVFreeBuffers[i] = FMVBuffers[i];
+	for (i = 0; i < AUDIO_STREAM_BUFFERS; i++) {
+		s->freeBuffers[i] = s->buffers[i];
 	}
-	FMVNumFreeBuffers = FMV_SOUND_BUFFERS;
-	FMVBuffersQueued = 0;
-	FMVStreamOpen = 1;
+	s->numFreeBuffers = AUDIO_STREAM_BUFFERS;
+	s->buffersQueued = 0;
+	s->queuedBytes = 0;
+	s->open = 1;
 
 	return 1;
 }
 
-void FMVSound_Close(void)
+void AudioStream_Close(int id)
 {
-	if (!FMVStreamOpen) {
+	AUDIOSTREAM *s;
+
+	if (id < 0 || id >= AUDIO_STREAM_COUNT) {
 		return;
 	}
 
-	alSourceStop(FMVSource);
-	alSourcei(FMVSource, AL_BUFFER, 0);	/* detaches the whole queue at once */
-	alDeleteSources(1, &FMVSource);
-	alDeleteBuffers(FMV_SOUND_BUFFERS, FMVBuffers);
+	s = &AudioStreams[id];
+	if (!s->open) {
+		return;
+	}
 
-	FMVStreamOpen = 0;
-	FMVNumFreeBuffers = 0;
-	FMVBuffersQueued = 0;
+	alSourceStop(s->source);
+	alSourcei(s->source, AL_BUFFER, 0);	/* detaches the whole queue at once */
+	alDeleteSources(1, &s->source);
+	alDeleteBuffers(AUDIO_STREAM_BUFFERS, s->buffers);
+
+	s->open = 0;
+	s->numFreeBuffers = 0;
+	s->buffersQueued = 0;
+	s->queuedBytes = 0;
 }
 
-void FMVSound_Update(void)
+void AudioStream_Update(int id)
 {
+	AUDIOSTREAM *s;
 	ALint processed = 0;
 	ALint state = 0;
 
-	if (!FMVStreamOpen) {
+	if (id < 0 || id >= AUDIO_STREAM_COUNT) {
 		return;
 	}
 
-	alGetSourcei(FMVSource, AL_BUFFERS_PROCESSED, &processed);
+	s = &AudioStreams[id];
+	if (!s->open) {
+		return;
+	}
+
+	alGetSourcei(s->source, AL_BUFFERS_PROCESSED, &processed);
 	while (processed-- > 0) {
 		ALuint buffer;
+		ALint size = 0;
 
-		alSourceUnqueueBuffers(FMVSource, 1, &buffer);
-		FMVFreeBuffers[FMVNumFreeBuffers++] = buffer;
-		FMVBuffersQueued--;
+		alSourceUnqueueBuffers(s->source, 1, &buffer);
+		alGetBufferi(buffer, AL_SIZE, &size);
+		if ((unsigned long)size <= s->queuedBytes) {
+			s->queuedBytes -= size;
+		} else {
+			s->queuedBytes = 0;
+		}
+		s->freeBuffers[s->numFreeBuffers++] = buffer;
+		s->buffersQueued--;
 	}
 
 	/* a long enough hitch drains the queue and stops the source by itself */
-	alGetSourcei(FMVSource, AL_SOURCE_STATE, &state);
-	if (state == AL_STOPPED && FMVBuffersQueued > 0) {
-		alSourcePlay(FMVSource);
+	alGetSourcei(s->source, AL_SOURCE_STATE, &state);
+	if (state == AL_STOPPED && s->buffersQueued > 0) {
+		alSourcePlay(s->source);
 	}
 }
 
-int FMVSound_CanQueue(void)
+int AudioStream_CanQueue(int id)
 {
-	return FMVStreamOpen && (FMVNumFreeBuffers > 0);
-}
-
-int FMVSound_IsPlaying(void)
-{
-	ALint state = 0;
-
-	if (!FMVStreamOpen || FMVBuffersQueued == 0) {
+	if (id < 0 || id >= AUDIO_STREAM_COUNT) {
 		return 0;
 	}
 
-	alGetSourcei(FMVSource, AL_SOURCE_STATE, &state);
-
-	return (state == AL_PLAYING) || (state == AL_PAUSED);
+	return AudioStreams[id].open && (AudioStreams[id].numFreeBuffers > 0);
 }
 
-void FMVSound_Queue(const unsigned char *data, unsigned long size)
+void AudioStream_Queue(int id, const unsigned char *data, unsigned long size)
 {
+	AUDIOSTREAM *s;
 	ALuint buffer;
 	ALint state = 0;
 
-	if (!FMVStreamOpen || FMVNumFreeBuffers == 0 || size == 0) {
+	if (id < 0 || id >= AUDIO_STREAM_COUNT) {
 		return;
 	}
 
-	buffer = FMVFreeBuffers[--FMVNumFreeBuffers];
+	s = &AudioStreams[id];
+	if (!s->open || s->numFreeBuffers == 0 || size == 0) {
+		return;
+	}
+
+	buffer = s->freeBuffers[--s->numFreeBuffers];
 
 	if (data != NULL) {
-		alBufferData(buffer, FMVFormat, data, size, FMVRate);
+		alBufferData(buffer, s->format, data, size, s->rate);
 	} else {
 		/* a gap in the soundtrack: queue silence so the stream keeps its length */
 		void *quiet = malloc(size);
 
 		if (quiet == NULL) {
-			FMVFreeBuffers[FMVNumFreeBuffers++] = buffer;
+			s->freeBuffers[s->numFreeBuffers++] = buffer;
 			return;
 		}
-		memset(quiet, FMVSilence, size);
-		alBufferData(buffer, FMVFormat, quiet, size, FMVRate);
+		memset(quiet, s->silence, size);
+		alBufferData(buffer, s->format, quiet, size, s->rate);
 		free(quiet);
 	}
 
-	alSourceQueueBuffers(FMVSource, 1, &buffer);
-	FMVBuffersQueued++;
+	alSourceQueueBuffers(s->source, 1, &buffer);
+	s->buffersQueued++;
+	s->queuedBytes += size;
 
-	alGetSourcei(FMVSource, AL_SOURCE_STATE, &state);
+	alGetSourcei(s->source, AL_SOURCE_STATE, &state);
 	if (state != AL_PLAYING) {
-		alSourcePlay(FMVSource);
+		alSourcePlay(s->source);
 	}
 }
 
-void FMVSound_SetVolume(int volume)
+int AudioStream_IsPlaying(int id)
 {
-	if (!FMVStreamOpen) {
+	AUDIOSTREAM *s;
+	ALint state = 0;
+
+	if (id < 0 || id >= AUDIO_STREAM_COUNT) {
+		return 0;
+	}
+
+	s = &AudioStreams[id];
+	if (!s->open || s->buffersQueued == 0) {
+		return 0;
+	}
+
+	alGetSourcei(s->source, AL_SOURCE_STATE, &state);
+
+	return (state == AL_PLAYING) || (state == AL_PAUSED);
+}
+
+unsigned long AudioStream_QueuedBytes(int id)
+{
+	if (id < 0 || id >= AUDIO_STREAM_COUNT || !AudioStreams[id].open) {
+		return 0;
+	}
+
+	return AudioStreams[id].queuedBytes;
+}
+
+void AudioStream_SetGain(int id, float gain)
+{
+	if (id < 0 || id >= AUDIO_STREAM_COUNT || !AudioStreams[id].open) {
 		return;
 	}
 
-	if (volume < 0) {
-		volume = 0;
-	} else if (volume > FMV_SOUND_VOLUME_MAX) {
-		volume = FMV_SOUND_VOLUME_MAX;
+	if (gain < 0.0f) {
+		gain = 0.0f;
+	} else if (gain > 1.0f) {
+		gain = 1.0f;
 	}
 
-	alSourcef(FMVSource, AL_GAIN, (float)volume / (float)FMV_SOUND_VOLUME_MAX);
+	alSourcef(AudioStreams[id].source, AL_GAIN, gain);
 }

@@ -9,7 +9,7 @@
 #include "stratdef.h"
 #include "gamedef.h"
 #include "fmv.h"
-#include "fmv_audio.h"
+#include "audio_stream.h"
 #include "files.h"
 #include "avp_menus.h"
 #include "avp_userprofile.h"
@@ -23,7 +23,7 @@ int VolumeOfNearestVideoScreen;
 int PanningOfNearestVideoScreen;
 
 extern char *ScreenBuffer;
-extern int GotAnyKey;
+extern unsigned char GotAnyKey;
 extern int NormalFrameTime;
 extern void DirectReadKeyboard(void);
 extern IMAGEHEADER ImageHeaderArray[];
@@ -60,6 +60,9 @@ void ReleaseFMVTexture(FMVTEXTURE *ftPtr);
 /* size of the TV static shown when a screen has no movie to play */
 #define FMV_STATIC_WIDTH  128
 #define FMV_STATIC_HEIGHT 96
+
+/* max of the SmackerSoundVolume menu slider (avp_menudata.c), == ONE_FIXED/512 */
+#define SMACKER_VOLUME_MAX 128
 
 /* most frames a movie may decode in one update, so a hitch costs dropped time
  * rather than a burst of fast-forward */
@@ -159,7 +162,7 @@ static void StopTriggeredFMV(void)
 
 	if (TriggeredFMV.HasAudio)
 	{
-		FMVSound_Close();
+		AudioStream_Close(AUDIO_STREAM_FMV);
 	}
 
 	TriggeredFMV.MessageNumber = 0;
@@ -213,10 +216,10 @@ static int StartTriggeredFMV(int number, unsigned long startFrame)
 	if (SMK_RESULT(smk_info_audio(TriggeredFMV.Handle, &trackMask, channels, bitdepth, rate)) == 0
 		&& (trackMask & SMK_AUDIO_TRACK_0))
 	{
-		TriggeredFMV.HasAudio = FMVSound_Open((int)rate[0], channels[0], bitdepth[0]);
+		TriggeredFMV.HasAudio = AudioStream_Open(AUDIO_STREAM_FMV, (int)rate[0], channels[0], bitdepth[0]);
 		if (TriggeredFMV.HasAudio)
 		{
-			FMVSound_SetVolume(SmackerSoundVolume);
+			AudioStream_SetGain(AUDIO_STREAM_FMV, (float)SmackerSoundVolume / (float)SMACKER_VOLUME_MAX);
 		}
 	}
 
@@ -257,7 +260,7 @@ static int DecodeFrame(smk handle, int started, int hasAudio)
 
 		if (audio != NULL && size > 0)
 		{
-			FMVSound_Queue(audio, size);
+			AudioStream_Queue(AUDIO_STREAM_FMV, audio, size);
 		}
 	}
 
@@ -279,8 +282,8 @@ static void AdvanceTriggeredFMV(void)
 
 	if (TriggeredFMV.HasAudio)
 	{
-		FMVSound_SetVolume(SmackerSoundVolume);
-		FMVSound_Update();
+		AudioStream_SetGain(AUDIO_STREAM_FMV, (float)SmackerSoundVolume / (float)SMACKER_VOLUME_MAX);
+		AudioStream_Update(AUDIO_STREAM_FMV);
 	}
 
 	if (!TriggeredFMV.Started)
@@ -298,7 +301,7 @@ static void AdvanceTriggeredFMV(void)
 	if (TriggeredFMV.Ended)
 	{
 		/* hold the last frame up until the queued sound has finished playing */
-		if (!TriggeredFMV.HasAudio || !FMVSound_IsPlaying())
+		if (!TriggeredFMV.HasAudio || !AudioStream_IsPlaying(AUDIO_STREAM_FMV))
 		{
 			StopTriggeredFMV();
 		}
@@ -320,7 +323,7 @@ static void AdvanceTriggeredFMV(void)
 	{
 		/* no free sound buffer means the queue is already a long way ahead:
 		 * leave the timer standing and try again next frame */
-		if (TriggeredFMV.HasAudio && !FMVSound_CanQueue())
+		if (TriggeredFMV.HasAudio && !AudioStream_CanQueue(AUDIO_STREAM_FMV))
 		{
 			break;
 		}
