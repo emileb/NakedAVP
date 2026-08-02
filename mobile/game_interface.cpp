@@ -282,6 +282,9 @@ void PortableAction(int state, int action)
         case PORT_ACT_AVP_ZOOM_IN:      if (state) s_buttons |= AVP_TOUCH_ZOOM_IN; break;
         case PORT_ACT_AVP_ZOOM_OUT:     if (state) s_buttons |= AVP_TOUCH_ZOOM_OUT; break;
 
+        case PORT_ACT_QUICKSAVE: if (state) s_buttons |= AVP_TOUCH_QUICKSAVE; break;
+        case PORT_ACT_QUICKLOAD: if (state) s_buttons |= AVP_TOUCH_QUICKLOAD; break;
+
         default:
             // Weapon number grid. PORT_ACT_WEAP0 is slot 10, as on the keyboard.
             if (state && action >= PORT_ACT_WEAP0 && action <= PORT_ACT_WEAP9)

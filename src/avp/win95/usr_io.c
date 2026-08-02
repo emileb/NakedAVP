@@ -31,6 +31,7 @@
 
 #if defined(__ANDROID__)
 #include "avp_touch_input.h"
+#include "savegame.h"
 #endif
 
 extern int InGameMenusAreRunning(void);
@@ -1679,6 +1680,13 @@ void ReadPlayerGameInput(STRATEGYBLOCK* sbPtr)
 
 		if (touch.weaponSlot)
 			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_WeaponNo = touch.weaponSlot;
+
+		// Same as the QuickSave/QuickLoad console commands: slot 0.
+		if (touch.buttons & AVP_TOUCH_QUICKSAVE)
+			SaveGameRequest = 0;
+
+		if (touch.buttons & AVP_TOUCH_QUICKLOAD)
+			LoadGameRequest = 0;
 
 		// Species abilities. Rqst_ChangeVision is the intensifier for the
 		// Marine, alien sense for the Alien, and the cloak for the Predator.

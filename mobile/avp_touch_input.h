@@ -24,9 +24,12 @@
 #define AVP_TOUCH_GRAPPLE      (1u << 14) // Predator
 #define AVP_TOUCH_ZOOM_IN      (1u << 15) // Predator
 #define AVP_TOUCH_ZOOM_OUT     (1u << 16) // Predator
+#define AVP_TOUCH_QUICKSAVE    (1u << 17)
+#define AVP_TOUCH_QUICKLOAD    (1u << 18)
 
 #define AVP_TOUCH_ONESHOT_MASK (AVP_TOUCH_CYCLE_VISION | AVP_TOUCH_FLARE | \
-                                AVP_TOUCH_GRAPPLE | AVP_TOUCH_ZOOM_IN | AVP_TOUCH_ZOOM_OUT)
+                                AVP_TOUCH_GRAPPLE | AVP_TOUCH_ZOOM_IN | AVP_TOUCH_ZOOM_OUT | \
+                                AVP_TOUCH_QUICKSAVE | AVP_TOUCH_QUICKLOAD)
 
 // Matches the engine's I_Marine/I_Predator/I_Alien ordering.
 #define AVP_PLAYER_MARINE   0
