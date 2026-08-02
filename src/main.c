@@ -1113,6 +1113,22 @@ char ShiftDown = 0;
 char CapsLockOn = 0;
 const char ShiftAddition[2] = { 32, 0 };
 
+#if defined(__ANDROID__)
+//
+// The OpenTouch SDL3 fork short-circuits SDL_StartTextInput when a show-keyboard
+// callback is registered, so text input never goes active, SDL_SendKeyboardText
+// is dropped and SDL_EVENT_TEXT_INPUT never arrives - which is the only thing
+// that feeds the menu text fields. Feed them from the key events instead.
+//
+static void AddTypedChar(char c)
+{
+	RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(c);
+	KeyboardEntryQueue_Add(c);
+}
+#else
+#define AddTypedChar(c) RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(c)
+#endif
+
 static void handle_keypress(int key, int unicode, int press)
 {	
 	if (key == -1)
@@ -1127,15 +1143,15 @@ static void handle_keypress(int key, int unicode, int press)
 	else if (press) {
 		if ((key >= KEY_A) && (key <= KEY_Z))
 		{
-			RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(65 + (key - KEY_A) + ShiftAddition[ShiftDown ^ CapsLockOn]);
+			AddTypedChar(65 + (key - KEY_A) + ShiftAddition[ShiftDown ^ CapsLockOn]);
 		}
 		else if ((key >= KEY_0) && (key <= KEY_9))
 		{
-			RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(48 + (key - KEY_0)); /* TODO: Shift numbers -> symbols */
+			AddTypedChar(48 + (key - KEY_0)); /* TODO: Shift numbers -> symbols */
 		}
 		else if ((key >= KEY_NUMPAD0) && (key <= KEY_NUMPAD9))
 		{
-			RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(48 + (key - KEY_NUMPAD0));
+			AddTypedChar(48 + (key - KEY_NUMPAD0));
 		}
 		else if (false) /* TODO: other symbols */
 		{
