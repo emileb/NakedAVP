@@ -302,6 +302,8 @@ LIST(APPEND source src/win95/zsp.cpp)
 LIST(APPEND source src/opengl.c)
 LIST(APPEND source src/oglfunc.c)
 LIST(APPEND source src/fmv.c)
+# libsmacker (LGPL 2.1) decodes the .smk plot movies the video screens play
+LIST(APPEND source src/libsmacker/smacker.c)
 LIST(APPEND source src/openal.c)
 LIST(APPEND source src/cdplayer.c)
 LIST(APPEND source src/menus.c)

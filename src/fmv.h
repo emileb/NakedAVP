@@ -10,16 +10,30 @@ typedef struct
 
 	int MessageNumber;
 
+	// libsmacker decoder for this screen's own looping movie (void* to keep
+	// smacker.h out of the headers). Null for triggered plot screens, which all
+	// share one decoder.
+	void* SmackHandle;
+	unsigned long FrameWidth;
+	unsigned long FrameHeight;
+	int FrameTime;		// fixed point seconds per frame
+	int FrameTimer;
+
+	// bumped when a new frame is ready, compared against to skip re-uploading
+	// a texture whose frame has not changed
+	unsigned long FrameSerial;
+	unsigned long ShownSerial;
+
 	// disabled direct3d stuff
 	//LPDIRECTDRAWSURFACE SrcSurface;
 	//LPDIRECT3DTEXTURE SrcTexture;
 	//LPDIRECT3DTEXTURE DestTexture;
 	PALETTEENTRY SrcPalette[256];
-	
+
 	// buffer used for opengl texture uploads
 	unsigned char* PalettedBuf;
 	unsigned char* RGBBuf;
-	
+
 	int RedScale;
 	int GreenScale;
 	int BlueScale;

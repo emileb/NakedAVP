@@ -18,6 +18,7 @@
 #include "dynamics.h"
 #include "dynblock.h"
 #include "stratdef.h"
+#include "fmv_audio.h"
 
 #if 0
 #define OPENAL_DEBUG
@@ -1165,4 +1166,177 @@ int LoadWavFromFastFile(int soundNum, char * wavFileName)
 	}
 
 	return ok;
+}
+
+/* ** FMV streaming ** */
+
+/* Smacker movie audio. Kept apart from the ACTIVESOUNDSAMPLE pool: those are
+ * all whole-buffer sounds, and a movie soundtrack has to be fed as it decodes.
+ */
+
+static ALuint FMVSource;
+static ALuint FMVBuffers[FMV_SOUND_BUFFERS];
+static ALuint FMVFreeBuffers[FMV_SOUND_BUFFERS];
+static int FMVNumFreeBuffers;
+static ALenum FMVFormat;
+static int FMVRate;
+static int FMVSilence;
+static int FMVStreamOpen = 0;
+static int FMVBuffersQueued;
+
+int FMVSound_Open(int rate, int channels, int bitdepth)
+{
+	int i;
+
+	if (!SoundActivated) {
+		return 0;
+	}
+
+	FMVSound_Close();
+
+	if (bitdepth == 16) {
+		FMVFormat = (channels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
+		FMVSilence = 0;
+	} else {
+		FMVFormat = (channels == 2) ? AL_FORMAT_STEREO8 : AL_FORMAT_MONO8;
+		FMVSilence = 128;	/* 8 bit AL samples are unsigned, as are Smacker's */
+	}
+	FMVRate = rate;
+
+	alGetError();
+
+	alGenSources(1, &FMVSource);
+	if (alGetError() != AL_NO_ERROR) {
+		return 0;
+	}
+
+	alGenBuffers(FMV_SOUND_BUFFERS, FMVBuffers);
+	if (alGetError() != AL_NO_ERROR) {
+		alDeleteSources(1, &FMVSource);
+		return 0;
+	}
+
+	/* played flat at the listener: this port never works out which video screen
+	 * is nearest, so there is nothing to pan or attenuate by */
+	alSourcei(FMVSource, AL_SOURCE_RELATIVE, AL_TRUE);
+	alSource3f(FMVSource, AL_POSITION, 0.0f, 0.0f, 0.0f);
+	alSourcei(FMVSource, AL_LOOPING, AL_FALSE);
+
+	for (i = 0; i < FMV_SOUND_BUFFERS; i++) {
+		FMVFreeBuffers[i] = FMVBuffers[i];
+	}
+	FMVNumFreeBuffers = FMV_SOUND_BUFFERS;
+	FMVBuffersQueued = 0;
+	FMVStreamOpen = 1;
+
+	return 1;
+}
+
+void FMVSound_Close(void)
+{
+	if (!FMVStreamOpen) {
+		return;
+	}
+
+	alSourceStop(FMVSource);
+	alSourcei(FMVSource, AL_BUFFER, 0);	/* detaches the whole queue at once */
+	alDeleteSources(1, &FMVSource);
+	alDeleteBuffers(FMV_SOUND_BUFFERS, FMVBuffers);
+
+	FMVStreamOpen = 0;
+	FMVNumFreeBuffers = 0;
+	FMVBuffersQueued = 0;
+}
+
+void FMVSound_Update(void)
+{
+	ALint processed = 0;
+	ALint state = 0;
+
+	if (!FMVStreamOpen) {
+		return;
+	}
+
+	alGetSourcei(FMVSource, AL_BUFFERS_PROCESSED, &processed);
+	while (processed-- > 0) {
+		ALuint buffer;
+
+		alSourceUnqueueBuffers(FMVSource, 1, &buffer);
+		FMVFreeBuffers[FMVNumFreeBuffers++] = buffer;
+		FMVBuffersQueued--;
+	}
+
+	/* a long enough hitch drains the queue and stops the source by itself */
+	alGetSourcei(FMVSource, AL_SOURCE_STATE, &state);
+	if (state == AL_STOPPED && FMVBuffersQueued > 0) {
+		alSourcePlay(FMVSource);
+	}
+}
+
+int FMVSound_CanQueue(void)
+{
+	return FMVStreamOpen && (FMVNumFreeBuffers > 0);
+}
+
+int FMVSound_IsPlaying(void)
+{
+	ALint state = 0;
+
+	if (!FMVStreamOpen || FMVBuffersQueued == 0) {
+		return 0;
+	}
+
+	alGetSourcei(FMVSource, AL_SOURCE_STATE, &state);
+
+	return (state == AL_PLAYING) || (state == AL_PAUSED);
+}
+
+void FMVSound_Queue(const unsigned char *data, unsigned long size)
+{
+	ALuint buffer;
+	ALint state = 0;
+
+	if (!FMVStreamOpen || FMVNumFreeBuffers == 0 || size == 0) {
+		return;
+	}
+
+	buffer = FMVFreeBuffers[--FMVNumFreeBuffers];
+
+	if (data != NULL) {
+		alBufferData(buffer, FMVFormat, data, size, FMVRate);
+	} else {
+		/* a gap in the soundtrack: queue silence so the stream keeps its length */
+		void *quiet = malloc(size);
+
+		if (quiet == NULL) {
+			FMVFreeBuffers[FMVNumFreeBuffers++] = buffer;
+			return;
+		}
+		memset(quiet, FMVSilence, size);
+		alBufferData(buffer, FMVFormat, quiet, size, FMVRate);
+		free(quiet);
+	}
+
+	alSourceQueueBuffers(FMVSource, 1, &buffer);
+	FMVBuffersQueued++;
+
+	alGetSourcei(FMVSource, AL_SOURCE_STATE, &state);
+	if (state != AL_PLAYING) {
+		alSourcePlay(FMVSource);
+	}
+}
+
+void FMVSound_SetVolume(int volume)
+{
+	if (!FMVStreamOpen) {
+		return;
+	}
+
+	if (volume < 0) {
+		volume = 0;
+	} else if (volume > FMV_SOUND_VOLUME_MAX) {
+		volume = FMV_SOUND_VOLUME_MAX;
+	}
+
+	alSourcef(FMVSource, AL_GAIN, (float)volume / (float)FMV_SOUND_VOLUME_MAX);
 }
