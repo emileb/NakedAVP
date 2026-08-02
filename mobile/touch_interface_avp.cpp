@@ -5,6 +5,7 @@
 //
 
 #include "touch_interface.h"
+#include "avp_touch_input.h"
 #include "SDL3/SDL_keycode.h"
 #include "SDL3/SDL_scancode.h"
 
@@ -26,19 +27,103 @@ void TouchInterface::mouseMove(int action, float x, float y, float mouse_x, floa
 {
 }
 
+//
+// The controls every species shares. Called once per species screen, so each
+// gets its own instances - nothing is shared between the three.
+//
+void TouchInterface::addBaseGameControls(touchcontrols::TouchControls *tc)
+{
+    tc->setAlpha(touchSettings.alpha);
+    tc->addControl(new touchcontrols::Button("back", touchcontrols::RectF(0, 0, 2, 2), "back_button", KEY_BACK_BUTTON, false, false, "Show menu"));
+    tc->addControl(new touchcontrols::Button("attack", touchcontrols::RectF(20, 7, 23, 10), "shoot", KEY_SHOOT, false, false, "Attack!"));
+    tc->addControl(new touchcontrols::Button("attack2", touchcontrols::RectF(3, 5, 6, 8), "shoot", KEY_SHOOT, false, true, "Attack! (duplicate)"));
+
+    tc->addControl(new touchcontrols::Button("use", touchcontrols::RectF(23, 6, 26, 9), "use", PORT_ACT_USE, false, false, "Use/Open"));
+    tc->addControl(new touchcontrols::Button("quick_save", touchcontrols::RectF(24, 0, 26, 2), "save", PORT_ACT_QUICKSAVE, false, false, "Quick save"));
+    tc->addControl(new touchcontrols::Button("quick_load", touchcontrols::RectF(20, 0, 22, 2), "load", PORT_ACT_QUICKLOAD, false, false, "Quick load"));
+
+    tc->addControl(new touchcontrols::Button("keyboard", touchcontrols::RectF(8, 0, 10, 2), "keyboard", KEY_SHOW_KBRD, false, false, "Show keyboard"));
+    tc->addControl(new touchcontrols::Button("show_mouse", touchcontrols::RectF(4, 0, 6, 2), "left_mouse", KEY_USE_MOUSE, false, true, "Use mouse"));
+
+    tc->addControl(new touchcontrols::Button("jump", touchcontrols::RectF(24, 3, 26, 5), "jump", PORT_ACT_JUMP, false, false, "Jump"));
+
+    tc->addControl(new touchcontrols::Button("crouch", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_DOWN, false, true, "Crouch"));
+    tc->addControl(new touchcontrols::Button("crouch_toggle", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_TOGGLE_CROUCH, false, true, "Crouch (toggle)"));
+    tc->addControl(new touchcontrols::Button("attack_alt", touchcontrols::RectF(21, 5, 23, 7), "shoot_alt", PORT_ACT_ALT_ATTACK, false, true, "Alt fire"));
+    tc->addControl(new touchcontrols::Button("show_custom", touchcontrols::RectF(0, 7, 2, 9), "custom_show", KEY_SHOW_CUSTOM, false, true, "Show custom"));
+    tc->addControl(new touchcontrols::Button("show_weapons", touchcontrols::RectF(12, 14, 14, 16), "show_weapons", KEY_SHOW_WEAPONS, false, false, "Show numbers"));
+    tc->addControl(new touchcontrols::Button("next_weapon", touchcontrols::RectF(0, 3, 3, 5), "next_weap", PORT_ACT_NEXT_WEP, false, false, "Next weapon"));
+    tc->addControl(new touchcontrols::Button("prev_weapon", touchcontrols::RectF(0, 5, 3, 7), "prev_weap", PORT_ACT_PREV_WEP, false, false, "Prev weapon"));
+    tc->addControl(new touchcontrols::Button("console", touchcontrols::RectF(6, 0, 8, 2), "tild", PORT_ACT_CONSOLE, false, true, "Console"));
+
+    touchcontrols::ButtonGrid *dpad = new touchcontrols::ButtonGrid("dpad_move", touchcontrols::RectF(6, 3, 12, 7), "", 3, 2, true, "Movement btns (WASD)");
+
+    dpad->addCell(0, 1, "direction_left", PORT_ACT_MOVE_LEFT);
+    dpad->addCell(2, 1, "direction_right", PORT_ACT_MOVE_RIGHT);
+    dpad->addCell(1, 0, "direction_up", PORT_ACT_FWD);
+    dpad->addCell(1, 1, "direction_down", PORT_ACT_BACK);
+    tc->addControl(dpad);
+
+    touchcontrols::TouchJoy *right = new touchcontrols::TouchJoy("touch", touchcontrols::RectF(17, 4, 26, 16), "look_arrow", "fixed_stick_circle");
+    tc->addControl(right);
+    right->signal_move.connect(sigc::mem_fun(this, &TouchInterface::rightStick));
+    right->signal_double_tap.connect(sigc::mem_fun(this, &TouchInterface::rightDoubleTap));
+
+    touchcontrols::TouchJoy *left = new touchcontrols::TouchJoy("stick", touchcontrols::RectF(0, 7, 8, 16), "strafe_arrow", "fixed_stick_circle");
+    tc->addControl(left);
+    left->signal_move.connect(sigc::mem_fun(this, &TouchInterface::leftStick));
+    left->signal_double_tap.connect(sigc::mem_fun(this, &TouchInterface::leftDoubleTap));
+
+    // SWAPFIX
+    left->registerTouchJoySWAPFIX(right);
+    right->registerTouchJoySWAPFIX(left);
+
+    // The base keeps one pair of stick pointers to apply its settings to;
+    // updateSpeciesControls repoints them when the active screen changes.
+    touchJoyLeft = left;
+    touchJoyRight = right;
+
+    tc->signal_button.connect(sigc::mem_fun(this, &TouchInterface::gameButton));
+    tc->signal_settingsButton.connect(sigc::mem_fun(this, &TouchInterface::gameSettingsButton));
+}
+
+void TouchInterface::addMarineControls(touchcontrols::TouchControls *tc)
+{
+    tc->addControl(new touchcontrols::Button("vision", touchcontrols::RectF(21, 10, 23, 12), "goggles", PORT_ACT_AVP_VISION, false, false, "Image intensifier"));
+    tc->addControl(new touchcontrols::Button("flare", touchcontrols::RectF(21, 12, 23, 14), "flashlight", PORT_ACT_AVP_FLARE, false, false, "Throw flare"));
+    // Unhidden by updateSpeciesControls when the level grants it.
+    tc->addControl(new touchcontrols::Button("jetpack", touchcontrols::RectF(19, 12, 21, 14), "wings", PORT_ACT_AVP_JETPACK, false, true, "Jetpack"));
+}
+
+void TouchInterface::addPredatorControls(touchcontrols::TouchControls *tc)
+{
+    tc->addControl(new touchcontrols::Button("cloak", touchcontrols::RectF(21, 10, 23, 12), "holster", PORT_ACT_AVP_CLOAK, false, false, "Cloak"));
+    tc->addControl(new touchcontrols::Button("cycle_vision", touchcontrols::RectF(21, 12, 23, 14), "goggles", PORT_ACT_AVP_CYCLE_VISION, false, false, "Cycle vision mode"));
+    tc->addControl(new touchcontrols::Button("zoom_in", touchcontrols::RectF(19, 10, 21, 12), "zoom", PORT_ACT_AVP_ZOOM_IN, false, false, "Zoom in"));
+    tc->addControl(new touchcontrols::Button("zoom_out", touchcontrols::RectF(19, 12, 21, 14), "binocular", PORT_ACT_AVP_ZOOM_OUT, false, false, "Zoom out"));
+    tc->addControl(new touchcontrols::Button("recall_disc", touchcontrols::RectF(17, 12, 19, 14), "reload", PORT_ACT_AVP_RECALL_DISC, false, false, "Recall disc"));
+    // Unhidden by updateSpeciesControls when the level grants it.
+    tc->addControl(new touchcontrols::Button("grapple", touchcontrols::RectF(17, 10, 19, 12), "force_pull", PORT_ACT_AVP_GRAPPLE, false, true, "Grappling hook"));
+}
+
+void TouchInterface::addAlienControls(touchcontrols::TouchControls *tc)
+{
+    tc->addControl(new touchcontrols::Button("vision", touchcontrols::RectF(21, 10, 23, 12), "goggles", PORT_ACT_AVP_VISION, false, false, "Alien sense"));
+}
+
 void TouchInterface::createControls(std::string filesPath)
 {
     tcMenuMain = new touchcontrols::TouchControls("menu", false, true, 10, false);
     tcYesNo = new touchcontrols::TouchControls("yes_no", false, false);
-    tcGameMain = new touchcontrols::TouchControls("game", false, true, 1, true);
+    tcGameMarine = new touchcontrols::TouchControls("game_marine", false, true, 1, true);
+    tcGamePredator = new touchcontrols::TouchControls("game_predator", false, true, 1, true);
+    tcGameAlien = new touchcontrols::TouchControls("game_alien", false, true, 1, true);
     tcGameWeapons = new touchcontrols::TouchControls("weapons", false, true, 1, false);
-    tcInventory = new touchcontrols::TouchControls("inventory", false, true, 2, false); //Different edit group
     tcWeaponWheel = new touchcontrols::TouchControls("weapon_wheel", false, true, 1, false);
     tcBlank = new touchcontrols::TouchControls("blank", true, false);
     tcCustomButtons = new touchcontrols::TouchControls("custom_buttons", false, true, 1, true);
     tcKeyboard = new touchcontrols::TouchControls("keyboard", false, false);
     tcGamepadUtility = new touchcontrols::TouchControls("gamepad_utility", false, false);
-    tcDPadInventory = new touchcontrols::TouchControls("dpad_inventory", false, false);
     tcMouse = new touchcontrols::TouchControls("mouse", false, false);
     // Hide the cog because when using the gamepad and weapon wheel is enabled, the cog will show otherwise
     tcWeaponWheel->hideEditButton = true;
@@ -67,56 +152,23 @@ void TouchInterface::createControls(std::string filesPath)
 
     //Game -------------------------------------------
     //------------------------------------------------------
-    tcGameMain->setAlpha(touchSettings.alpha);
-    tcGameMain->addControl(new touchcontrols::Button("back", touchcontrols::RectF(0, 0, 2, 2), "back_button", KEY_BACK_BUTTON, false, false, "Show menu"));
-    tcGameMain->addControl(new touchcontrols::Button("attack", touchcontrols::RectF(20, 7, 23, 10), "shoot", KEY_SHOOT, false, false, "Attack!"));
-    tcGameMain->addControl(new touchcontrols::Button("attack2", touchcontrols::RectF(3, 5, 6, 8), "shoot", KEY_SHOOT, false, true, "Attack! (duplicate)"));
+    // A full screen per species, so the abilities are laid out and edited
+    // together with the controls they sit next to. tcGameMain points at the
+    // active one, which is all the base class tracks.
+    //
+    // Abilities go in first: the look stick covers most of the right side, and
+    // whichever control was added first wins the touch, so adding it before
+    // them would make the ability buttons hard to grab in the editor.
+    addMarineControls(tcGameMarine);
+    addBaseGameControls(tcGameMarine);
 
-    tcGameMain->addControl(new touchcontrols::Button("use", touchcontrols::RectF(23, 6, 26, 9), "use", PORT_ACT_USE, false, false, "Use/Open"));
-    tcGameMain->addControl(new touchcontrols::Button("quick_save", touchcontrols::RectF(24, 0, 26, 2), "save", PORT_ACT_QUICKSAVE, false, false, "Quick save"));
-    tcGameMain->addControl(new touchcontrols::Button("quick_load", touchcontrols::RectF(20, 0, 22, 2), "load", PORT_ACT_QUICKLOAD, false, false, "Quick load"));
+    addPredatorControls(tcGamePredator);
+    addBaseGameControls(tcGamePredator);
 
-    tcGameMain->addControl(new touchcontrols::Button("keyboard", touchcontrols::RectF(8, 0, 10, 2), "keyboard", KEY_SHOW_KBRD, false, false, "Show keyboard"));
-    tcGameMain->addControl(new touchcontrols::Button("show_mouse", touchcontrols::RectF(4, 0, 6, 2), "left_mouse", KEY_USE_MOUSE, false, true, "Use mouse"));
+    addAlienControls(tcGameAlien);
+    addBaseGameControls(tcGameAlien);
 
-    bool hideJump = false;
-    tcGameMain->addControl(new touchcontrols::Button("jump", touchcontrols::RectF(24, 3, 26, 5), "jump", PORT_ACT_JUMP, false, hideJump, "Jump"));
-
-    bool hideInventory = false;
-    tcGameMain->addControl(new touchcontrols::Button("use_inventory", touchcontrols::RectF(0, 9, 2, 11), "inventory", KEY_SHOW_INV, false, hideInventory, "Show Inventory"));
-    tcGameMain->addControl(new touchcontrols::Button("crouch", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_DOWN, false, true, "Crouch"));
-    tcGameMain->addControl(new touchcontrols::Button("crouch_toggle", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_TOGGLE_CROUCH, false, true, "Crouch (toggle)"));
-    tcGameMain->addControl(new touchcontrols::Button("attack_alt", touchcontrols::RectF(21, 5, 23, 7), "shoot_alt", PORT_ACT_ALT_ATTACK, false, true, "Alt fire"));
-    tcGameMain->addControl(new touchcontrols::Button("show_custom", touchcontrols::RectF(0, 7, 2, 9), "custom_show", KEY_SHOW_CUSTOM, false, true, "Show custom"));
-    tcGameMain->addControl(new touchcontrols::Button("show_weapons", touchcontrols::RectF(12, 14, 14, 16), "show_weapons", KEY_SHOW_WEAPONS, false, false, "Show numbers"));
-    tcGameMain->addControl(new touchcontrols::Button("next_weapon", touchcontrols::RectF(0, 3, 3, 5), "next_weap", PORT_ACT_NEXT_WEP, false, false, "Next weapon"));
-    tcGameMain->addControl(new touchcontrols::Button("prev_weapon", touchcontrols::RectF(0, 5, 3, 7), "prev_weap", PORT_ACT_PREV_WEP, false, false, "Prev weapon"));
-    tcGameMain->addControl(new touchcontrols::Button("console", touchcontrols::RectF(6, 0, 8, 2), "tild", PORT_ACT_CONSOLE, false, true, "Console"));
-
-    touchcontrols::ButtonGrid *dpad = new touchcontrols::ButtonGrid("dpad_move", touchcontrols::RectF(6, 3, 12, 7), "", 3, 2, true, "Movement btns (WASD)");
-
-    dpad->addCell(0, 1, "direction_left", PORT_ACT_MOVE_LEFT);
-    dpad->addCell(2, 1, "direction_right", PORT_ACT_MOVE_RIGHT);
-    dpad->addCell(1, 0, "direction_up", PORT_ACT_FWD);
-    dpad->addCell(1, 1, "direction_down", PORT_ACT_BACK);
-    tcGameMain->addControl(dpad);
-
-    touchJoyRight = new touchcontrols::TouchJoy("touch", touchcontrols::RectF(17, 4, 26, 16), "look_arrow", "fixed_stick_circle");
-    tcGameMain->addControl(touchJoyRight);
-    touchJoyRight->signal_move.connect(sigc::mem_fun(this, &TouchInterface::rightStick));
-    touchJoyRight->signal_double_tap.connect(sigc::mem_fun(this, &TouchInterface::rightDoubleTap));
-
-    touchJoyLeft = new touchcontrols::TouchJoy("stick", touchcontrols::RectF(0, 7, 8, 16), "strafe_arrow", "fixed_stick_circle");
-    tcGameMain->addControl(touchJoyLeft);
-    touchJoyLeft->signal_move.connect(sigc::mem_fun(this, &TouchInterface::leftStick));
-    touchJoyLeft->signal_double_tap.connect(sigc::mem_fun(this, &TouchInterface::leftDoubleTap));
-
-    // SWAPFIX
-    touchJoyLeft->registerTouchJoySWAPFIX(touchJoyRight);
-    touchJoyRight->registerTouchJoySWAPFIX(touchJoyLeft);
-
-    tcGameMain->signal_button.connect(sigc::mem_fun(this, &TouchInterface::gameButton));
-    tcGameMain->signal_settingsButton.connect(sigc::mem_fun(this, &TouchInterface::gameSettingsButton));
+    tcGameMain = tcGameMarine;
 
     //Weapons -------------------------------------------
     //------------------------------------------------------
@@ -148,24 +200,8 @@ void TouchInterface::createControls(std::string filesPath)
     else
         tcWeaponWheel->setAlpha(touchSettings.alpha);
 
-    // Inventory -------------------------------------------
-    //------------------------------------------------------
-
-    uiInventoryButtonGrid = new touchcontrols::ButtonGrid("inventory_grid", touchcontrols::RectF(3, 9, 11, 11), "inventory_bg", 4, 1);
-
-    uiInventoryButtonGrid->addCell(0, 0, "inventory_left", PORT_ACT_INVPREV);
-    uiInventoryButtonGrid->addCell(1, 0, "inventory_right", PORT_ACT_INVNEXT);
-    uiInventoryButtonGrid->addCell(2, 0, "inventory_use", PORT_ACT_INVUSE);
-    uiInventoryButtonGrid->addCell(3, 0, "inventory_drop", PORT_ACT_INVDROP);
-
-
-    uiInventoryButtonGrid->signal_outside.connect(sigc::mem_fun(this, &TouchInterface::inventoryOutside));
-
-    tcInventory->addControl(uiInventoryButtonGrid);
-    tcInventory->setPassThroughTouch(touchcontrols::TouchControls::PassThrough::NO_CONTROL);
-    tcInventory->signal_button.connect(sigc::mem_fun(this, &TouchInterface::inventoryButton));
-    tcInventory->setAlpha(0.9);
-
+    // No inventory: AvP has no such concept - weapons are direct-select and
+    // there are no usable items, so tcInventory/tcDPadInventory stay NULL.
 
     //Blank -------------------------------------------
     //------------------------------------------------------
@@ -204,20 +240,6 @@ void TouchInterface::createControls(std::string filesPath)
     tcGamepadUtility->setAlpha(0.9);
     tcGamepadUtility->signal_button.connect(sigc::mem_fun(this, &TouchInterface::gameUtilitiesButton));
 
-    // DPad inventory -------------------------------------------
-    //------------------------------------------------------
-    touchcontrols::DPadSelect *dpadInventory = new touchcontrols::DPadSelect("dpad_inventory", touchcontrols::RectF(9, 4, 17, 12), "dpad", PORT_ACT_INVUSE);
-
-    dpadInventory->addCell(touchcontrols::DPAD_LEFT, "inventory_left", PORT_ACT_INVPREV);
-    dpadInventory->addCell(touchcontrols::DPAD_RIGHT, "inventory_right", PORT_ACT_INVNEXT);
-    dpadInventory->addCell(touchcontrols::DPAD_DOWN, "inventory_drop", PORT_ACT_INVDROP);
-
-    dpadInventory->signal_button.connect(sigc::mem_fun(this, &TouchInterface::dPadInventoryButton));
-    dpadInventory->signal_outside.connect(sigc::mem_fun(this, &TouchInterface::dPadInventoryOutside));
-
-    tcDPadInventory->addControl(dpadInventory);
-    tcDPadInventory->setAlpha(0.9);
-
     // Relative-drag mouse look (menus / touch pointer)
     touchcontrols::Mouse *mouse = new touchcontrols::Mouse("mouse", touchcontrols::RectF(0, 0, 26, 16), "");
     mouse->setHideGraphics(true);
@@ -243,11 +265,11 @@ void TouchInterface::createControls(std::string filesPath)
     //---------------------------------------------------------------
     //---------------------------------------------------------------
     controlsContainer.addControlGroup(tcKeyboard);
-    controlsContainer.addControlGroup(tcInventory); // before gamemain so touches don't go through
     controlsContainer.addControlGroup(tcGamepadUtility); // before gamemain so touches don't go through
-    controlsContainer.addControlGroup(tcDPadInventory);
     controlsContainer.addControlGroup(tcCustomButtons);
-    controlsContainer.addControlGroup(tcGameMain);
+    controlsContainer.addControlGroup(tcGameMarine);
+    controlsContainer.addControlGroup(tcGamePredator);
+    controlsContainer.addControlGroup(tcGameAlien);
     controlsContainer.addControlGroup(tcYesNo);
     controlsContainer.addControlGroup(tcGameWeapons);
     controlsContainer.addControlGroup(tcMenuMain);
@@ -257,10 +279,13 @@ void TouchInterface::createControls(std::string filesPath)
 
     tcMenuMain->setXMLFile((std::string) filesPath + "/menu.xml");
 
-    tcGameMain->setXMLFile((std::string) filesPath + "/game_"
+    tcGameMarine->setXMLFile((std::string) filesPath + "/game_marine_"
     ENGINE_NAME
     ".xml");
-    tcInventory->setXMLFile((std::string) filesPath + "/inventory_"
+    tcGamePredator->setXMLFile((std::string) filesPath + "/game_predator_"
+    ENGINE_NAME
+    ".xml");
+    tcGameAlien->setXMLFile((std::string) filesPath + "/game_alien_"
     ENGINE_NAME
     ".xml");
     tcWeaponWheel->setXMLFile((std::string) filesPath + "/weaponwheel_"
@@ -272,6 +297,69 @@ void TouchInterface::createControls(std::string filesPath)
     tcCustomButtons->setXMLFile((std::string) filesPath + "/custom_buttons_0_"
     ENGINE_NAME
     ".xml");
+}
+
+//
+// Points tcGameMain at the current species' screen. Everything else - fading,
+// alpha, hiding for menus - is the base class's job and keeps working because
+// it only ever looks at tcGameMain.
+//
+void TouchInterface::updateSpeciesControls()
+{
+    int playerType = AVP_GetPlayerType();
+    unsigned int abilities = AVP_GetPlayerAbilities();
+
+    if (playerType != lastPlayerType)
+    {
+        touchcontrols::TouchControls *next = tcGameMarine;
+
+        if (playerType == AVP_PLAYER_PREDATOR)
+            next = tcGamePredator;
+        else if (playerType == AVP_PLAYER_ALIEN)
+            next = tcGameAlien;
+
+        if (next != tcGameMain)
+        {
+            bool wasEnabled = tcGameMain->isEnabled();
+
+            tcGameMarine->setEnabled(false);
+            tcGamePredator->setEnabled(false);
+            tcGameAlien->setEnabled(false);
+
+            tcGameMain = next;
+            tcGameMain->setAlpha(touchSettings.alpha);
+            tcGameMain->setEnabled(wasEnabled);
+
+            touchJoyLeft = (touchcontrols::TouchJoy *) tcGameMain->getControl("stick");
+            touchJoyRight = (touchcontrols::TouchJoy *) tcGameMain->getControl("touch");
+
+            if (touchJoyLeft)
+            {
+                touchJoyLeft->setCenterAnchor(touchSettings.fixedMoveStick);
+                touchJoyLeft->setHideGraphics(!touchSettings.showLeftStick);
+            }
+
+            if (touchJoyRight)
+                touchJoyRight->setHideGraphics(!touchSettings.showRightStick);
+        }
+
+        lastPlayerType = playerType;
+    }
+
+    if (abilities != lastAbilities)
+    {
+        // Edge triggered, so a player who hides these again is left alone.
+        touchcontrols::Button *jetpack = (touchcontrols::Button *) tcGameMarine->getControl("jetpack");
+        touchcontrols::Button *grapple = (touchcontrols::Button *) tcGamePredator->getControl("grapple");
+
+        if (jetpack)
+            jetpack->setHidden(!(abilities & AVP_ABILITY_JETPACK));
+
+        if (grapple)
+            grapple->setHidden(!(abilities & AVP_ABILITY_GRAPPLE));
+
+        lastAbilities = abilities;
+    }
 }
 
 void TouchInterface::blankButton(int state, int code)
@@ -303,6 +391,8 @@ void TouchInterface::newFrame()
     updateTouchScreenModeIn(screenMode);
 
     currentScreenMode = screenMode;
+
+    updateSpeciesControls();
 }
 
 void TouchInterface::newGLContext()

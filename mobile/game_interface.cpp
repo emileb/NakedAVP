@@ -171,6 +171,7 @@ int PortableKeyEvent(int state, int code, int unitcode)
 static volatile float s_moveStick, s_strafeStick;   // analog stick
 static volatile int s_moveDigital, s_strafeDigital; // dpad, -1/0/+1
 static volatile unsigned int s_buttons;
+static volatile int s_weaponSlot;
 
 static volatile float s_yawMouse, s_pitchMouse; // accumulated, drained per frame
 static volatile float s_yawJoy, s_pitchJoy;     // held rate
@@ -195,6 +196,11 @@ extern "C" void AVP_GetTouchInput(AVP_TouchInput *out)
     out->move = s_moveDigital ? s_moveDigital * ONE_FIXED : clampFixed(s_moveStick);
     out->strafe = s_strafeDigital ? s_strafeDigital * ONE_FIXED : clampFixed(s_strafeStick);
     out->buttons = s_buttons;
+    out->weaponSlot = s_weaponSlot;
+
+    // One-shots fire on the frame they are collected, not for as long as held.
+    s_buttons &= ~AVP_TOUCH_ONESHOT_MASK;
+    s_weaponSlot = 0;
 }
 
 extern "C" void AVP_GetTouchLook(float *yawMouse, float *pitchMouse, float *yawJoy, float *pitchJoy)
@@ -262,6 +268,28 @@ void PortableAction(int state, int action)
 
         // IOFOCUS_Toggle is hardwired to this key, not rebindable.
         case PORT_ACT_CONSOLE: queueKey(SDL_SCANCODE_GRAVE, state); break;
+
+        // Species abilities. Held ones the engine debounces itself; the rest
+        // are latched here and cleared once the engine has collected them.
+        case PORT_ACT_AVP_VISION:      setButton(state, AVP_TOUCH_VISION); break;
+        case PORT_ACT_AVP_CLOAK:       setButton(state, AVP_TOUCH_VISION); break;
+        case PORT_ACT_AVP_JETPACK:     setButton(state, AVP_TOUCH_JETPACK); break;
+        case PORT_ACT_AVP_RECALL_DISC: setButton(state, AVP_TOUCH_RECALL_DISC); break;
+
+        case PORT_ACT_AVP_CYCLE_VISION: if (state) s_buttons |= AVP_TOUCH_CYCLE_VISION; break;
+        case PORT_ACT_AVP_FLARE:        if (state) s_buttons |= AVP_TOUCH_FLARE; break;
+        case PORT_ACT_AVP_GRAPPLE:      if (state) s_buttons |= AVP_TOUCH_GRAPPLE; break;
+        case PORT_ACT_AVP_ZOOM_IN:      if (state) s_buttons |= AVP_TOUCH_ZOOM_IN; break;
+        case PORT_ACT_AVP_ZOOM_OUT:     if (state) s_buttons |= AVP_TOUCH_ZOOM_OUT; break;
+
+        default:
+            // Weapon number grid. PORT_ACT_WEAP0 is slot 10, as on the keyboard.
+            if (state && action >= PORT_ACT_WEAP0 && action <= PORT_ACT_WEAP9)
+            {
+                int n = action - PORT_ACT_WEAP0;
+                s_weaponSlot = n ? n : 10;
+            }
+            break;
     }
 }
 

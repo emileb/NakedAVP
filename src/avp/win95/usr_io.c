@@ -1676,9 +1676,83 @@ void ReadPlayerGameInput(STRATEGYBLOCK* sbPtr)
 		// Default is run, so this button clears the flag rather than setting one.
 		if (touch.buttons & AVP_TOUCH_WALK)
 			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Faster = 0;
+
+		if (touch.weaponSlot)
+			playerStatusPtr->Mvt_InputRequests.Flags.Rqst_WeaponNo = touch.weaponSlot;
+
+		// Species abilities. Rqst_ChangeVision is the intensifier for the
+		// Marine, alien sense for the Alien, and the cloak for the Predator.
+		if (playerStatusPtr->IsAlive)
+		{
+			extern int CameraZoomLevel;
+
+			if (touch.buttons & AVP_TOUCH_VISION)
+				playerStatusPtr->Mvt_InputRequests.Flags.Rqst_ChangeVision = 1;
+
+			switch (AvP.PlayerType)
+			{
+				case I_Marine:
+					if (touch.buttons & AVP_TOUCH_FLARE)
+						ThrowAFlare();
+					if (touch.buttons & AVP_TOUCH_JETPACK)
+						playerStatusPtr->Mvt_InputRequests.Flags.Rqst_Jetpack = 1;
+					break;
+
+				case I_Predator:
+					if (touch.buttons & AVP_TOUCH_CYCLE_VISION)
+						playerStatusPtr->Mvt_InputRequests.Flags.Rqst_CycleVisionMode = 1;
+					if (touch.buttons & AVP_TOUCH_GRAPPLE)
+						playerStatusPtr->Mvt_InputRequests.Flags.Rqst_GrapplingHook = 1;
+					if (touch.buttons & AVP_TOUCH_RECALL_DISC)
+						Recall_Disc();
+					if ((touch.buttons & AVP_TOUCH_ZOOM_IN) && CameraZoomLevel < 3)
+						CameraZoomLevel++;
+					if ((touch.buttons & AVP_TOUCH_ZOOM_OUT) && CameraZoomLevel > 0)
+						CameraZoomLevel--;
+					break;
+
+				default:
+					break;
+			}
+		}
 	}
 #endif
 }
+
+#if defined(__ANDROID__)
+// Lets the touch layer pick a per-species control set.
+int AVP_GetPlayerType(void)
+{
+	switch (AvP.PlayerType)
+	{
+		case I_Predator: return AVP_PLAYER_PREDATOR;
+		case I_Alien:    return AVP_PLAYER_ALIEN;
+		default:         return AVP_PLAYER_MARINE;
+	}
+}
+
+unsigned int AVP_GetPlayerAbilities(void)
+{
+	PLAYER_STATUS *playerStatusPtr;
+	unsigned int abilities = 0;
+
+	if (Player == NULL || Player->ObStrategyBlock == NULL)
+		return 0;
+
+	playerStatusPtr = (PLAYER_STATUS *) (Player->ObStrategyBlock->SBdataptr);
+
+	if (playerStatusPtr == NULL)
+		return 0;
+
+	if (playerStatusPtr->JetpackEnabled)
+		abilities |= AVP_ABILITY_JETPACK;
+
+	if (playerStatusPtr->GrapplingHookEnabled)
+		abilities |= AVP_ABILITY_GRAPPLE;
+
+	return abilities;
+}
+#endif
 
 void LoadKeyConfiguration(void)
 {
