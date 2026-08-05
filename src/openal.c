@@ -5,6 +5,9 @@
 
 #include <al.h>
 #include <alc.h>
+#if defined(__ANDROID__)
+#include <alext.h>
+#endif
 
 #include "fixer.h"
 
@@ -261,6 +264,28 @@ void PlatEndSoundSys()
 /* TODO - free everything */
 	fprintf(stderr, "OPENAL: PlatEndSoundSys()\n");
 }
+
+#if defined(__ANDROID__)
+// Backgrounding blocks the game thread but not openal-soft's mixer, so sounds,
+// streams and music would play on over a minimized app. Pausing the device
+// covers all of them at once and keeps every source's state. Called from both
+// the focus and the background events, hence the state check.
+void AVP_PauseSoundSys(int pause)
+{
+	static int paused = 0;
+
+	if (!SoundActivated || AvpSoundDevice == NULL || pause == paused)
+		return;
+
+	paused = pause;
+	fprintf(stderr, "OPENAL: sound device %s\n", pause ? "paused" : "resumed");
+
+	if (pause)
+		alcDevicePauseSOFT(AvpSoundDevice);
+	else
+		alcDeviceResumeSOFT(AvpSoundDevice);
+}
+#endif
 
 // this table plots the frequency change for
 // 128/ths of a semitone for one octave (0-1535),

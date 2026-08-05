@@ -66,6 +66,8 @@ void RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_KEYDOWN(int wParam);
 extern int AVP_PopPortableKey(int *scancode, int *press);
 // opengl.c - undo the GL state the touch controls leave behind on swap.
 extern void AVP_RestoreGLState(void);
+// openal.c - pause the whole sound device while the app is in the background.
+extern void AVP_PauseSoundSys(int pause);
 // -u, divides the virtual screen size to enlarge the fixed-pixel menus and HUD.
 static float UIScale = 1.0f;
 #include "avp_touch_input.h"
@@ -663,6 +665,17 @@ static bool SDLCALL SDLEventFilter(void* userData, SDL_Event* event) {
 		case SDL_EVENT_TERMINATING:
 			AvP.MainLoopRunning = 0; /* TODO */
 			break;
+#if defined(__ANDROID__)
+		// Handled here rather than in the main loop: SDL queues these and then
+		// blocks the game thread inside the same SDL_PollEvent, so the loop
+		// only sees them once the app is back (SDL_androidevents.c).
+		case SDL_EVENT_WILL_ENTER_BACKGROUND:
+			AVP_PauseSoundSys(1);
+			break;
+		case SDL_EVENT_WILL_ENTER_FOREGROUND:
+			AVP_PauseSoundSys(0);
+			break;
+#endif
 	}
 	
 	return true;
@@ -1274,7 +1287,17 @@ void CheckForWindowsMessages()
 				break;
 			case SDL_EVENT_WINDOW_FOCUS_LOST:
 					// disable mouse grab?
+#if defined(__ANDROID__)
+					// Pushed straight from the Java thread, so this lands well
+					// before the pause events and stops the audio at once.
+					AVP_PauseSoundSys(1);
+#endif
 				break;
+#if defined(__ANDROID__)
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+					AVP_PauseSoundSys(0);
+				break;
+#endif
 			case SDL_EVENT_WINDOW_RESIZED:
 					//printf("test, %d,%d\n", event.window.data1, event.window.data2);
 					WindowWidth = event.window.data1;
