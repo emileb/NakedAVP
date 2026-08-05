@@ -47,8 +47,9 @@ void TouchInterface::addBaseGameControls(touchcontrols::TouchControls *tc)
 
     tc->addControl(new touchcontrols::Button("jump", touchcontrols::RectF(24, 3, 26, 5), "jump", PORT_ACT_JUMP, false, false, "Jump"));
 
-    tc->addControl(new touchcontrols::Button("crouch", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_DOWN, false, true, "Crouch"));
-    tc->addControl(new touchcontrols::Button("crouch_toggle", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_TOGGLE_CROUCH, false, true, "Crouch (toggle)"));
+    // Toggle only: crouch is a sustained state here, and for the Alien it is
+    // the wall-crawl mode, so there is no point holding a button down for it.
+    tc->addControl(new touchcontrols::Button("crouch_toggle", touchcontrols::RectF(24, 14, 26, 16), "crouch", PORT_ACT_TOGGLE_CROUCH, false, false, "Crouch (toggle)"));
     tc->addControl(new touchcontrols::Button("attack_alt", touchcontrols::RectF(21, 5, 23, 7), "shoot_alt", PORT_ACT_ALT_ATTACK, false, true, "Alt fire"));
     tc->addControl(new touchcontrols::Button("show_custom", touchcontrols::RectF(0, 7, 2, 9), "custom_show", KEY_SHOW_CUSTOM, false, true, "Show custom"));
     tc->addControl(new touchcontrols::Button("show_weapons", touchcontrols::RectF(12, 14, 14, 16), "show_weapons", KEY_SHOW_WEAPONS, false, false, "Show numbers"));
@@ -99,8 +100,11 @@ void TouchInterface::addPredatorControls(touchcontrols::TouchControls *tc)
 {
     tc->addControl(new touchcontrols::Button("cloak", touchcontrols::RectF(21, 10, 23, 12), "holster", PORT_ACT_AVP_CLOAK, false, false, "Cloak"));
     tc->addControl(new touchcontrols::Button("cycle_vision", touchcontrols::RectF(21, 12, 23, 14), "goggles", PORT_ACT_AVP_CYCLE_VISION, false, false, "Cycle vision mode"));
-    tc->addControl(new touchcontrols::Button("zoom_in", touchcontrols::RectF(19, 10, 21, 12), "zoom", PORT_ACT_AVP_ZOOM_IN, false, false, "Zoom in"));
-    tc->addControl(new touchcontrols::Button("zoom_out", touchcontrols::RectF(19, 12, 21, 14), "binocular", PORT_ACT_AVP_ZOOM_OUT, false, false, "Zoom out"));
+    // Zoom is a 4-level stepped range, so slide up/down rather than two buttons.
+    touchcontrols::QuadSlide *zoomQs = new touchcontrols::QuadSlide("quad_slide_zoom", touchcontrols::RectF(19, 10, 21, 12), "binocular", "slide_arrow",
+                                                                   PORT_ACT_AVP_ZOOM_IN, 0, PORT_ACT_AVP_ZOOM_OUT, 0, false, "Zoom in/out");
+    zoomQs->signal.connect(sigc::mem_fun(this, &TouchInterface::gameButton));
+    tc->addControl(zoomQs);
     tc->addControl(new touchcontrols::Button("recall_disc", touchcontrols::RectF(17, 12, 19, 14), "reload", PORT_ACT_AVP_RECALL_DISC, false, false, "Recall disc"));
     // Unhidden by updateSpeciesControls when the level grants it.
     tc->addControl(new touchcontrols::Button("grapple", touchcontrols::RectF(17, 10, 19, 12), "force_pull", PORT_ACT_AVP_GRAPPLE, false, true, "Grappling hook"));

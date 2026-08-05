@@ -165,8 +165,8 @@ int PortableKeyEvent(int state, int code, int unitcode)
 // which saturates the turn rate at about 1024 with the default sensitivity.
 #define LOOK_MOUSE_YAW_SCALE   2500.0f
 #define LOOK_MOUSE_PITCH_SCALE 1500.0f
-#define LOOK_JOY_YAW_SCALE     100.0f
-#define LOOK_JOY_PITCH_SCALE   500.0f
+#define LOOK_JOY_YAW_SCALE     800.0f
+#define LOOK_JOY_PITCH_SCALE   5000.0f
 
 static volatile float s_moveStick, s_strafeStick;   // analog stick
 static volatile int s_moveDigital, s_strafeDigital; // dpad, -1/0/+1
@@ -207,7 +207,7 @@ extern "C" void AVP_GetTouchLook(float *yawMouse, float *pitchMouse, float *yawJ
 {
     *yawMouse = -s_yawMouse;
     *pitchMouse = -s_pitchMouse;
-    *yawJoy = s_yawJoy;
+    *yawJoy = -s_yawJoy;
     *pitchJoy = s_pitchJoy;
 
     s_yawMouse = 0.0f;
