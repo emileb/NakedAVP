@@ -9,6 +9,8 @@
 #include "SDL3/SDL_keycode.h"
 #include "SDL3/SDL_scancode.h"
 
+// Editor cycle group shared by all the in-game screens.
+#define GAME_EDIT_GROUP 1
 
 void TouchInterface::openGLStart()
 {
@@ -90,38 +92,40 @@ void TouchInterface::addBaseGameControls(touchcontrols::TouchControls *tc)
 
 void TouchInterface::addMarineControls(touchcontrols::TouchControls *tc)
 {
-    tc->addControl(new touchcontrols::Button("vision", touchcontrols::RectF(21, 10, 23, 12), "goggles", PORT_ACT_AVP_VISION, false, false, "Image intensifier"));
-    tc->addControl(new touchcontrols::Button("flare", touchcontrols::RectF(21, 12, 23, 14), "flashlight", PORT_ACT_AVP_FLARE, false, false, "Throw flare"));
+    tc->addControl(new touchcontrols::Button("vision", touchcontrols::RectF(16, 3, 18, 5), "goggles", PORT_ACT_AVP_VISION, false, false, "Image intensifier"));
+    tc->addControl(new touchcontrols::Button("flare", touchcontrols::RectF(18, 3, 20, 5), "flashlight", PORT_ACT_AVP_FLARE, false, false, "Throw flare"));
     // Unhidden by updateSpeciesControls when the level grants it.
-    tc->addControl(new touchcontrols::Button("jetpack", touchcontrols::RectF(19, 12, 21, 14), "wings", PORT_ACT_AVP_JETPACK, false, true, "Jetpack"));
+    tc->addControl(new touchcontrols::Button("jetpack", touchcontrols::RectF(20, 3, 22, 5), "wings", PORT_ACT_AVP_JETPACK, false, true, "Jetpack"));
 }
 
 void TouchInterface::addPredatorControls(touchcontrols::TouchControls *tc)
 {
-    tc->addControl(new touchcontrols::Button("cloak", touchcontrols::RectF(21, 10, 23, 12), "holster", PORT_ACT_AVP_CLOAK, false, false, "Cloak"));
-    tc->addControl(new touchcontrols::Button("cycle_vision", touchcontrols::RectF(21, 12, 23, 14), "goggles", PORT_ACT_AVP_CYCLE_VISION, false, false, "Cycle vision mode"));
+    tc->addControl(new touchcontrols::Button("cloak", touchcontrols::RectF(20, 3, 22, 5), "holster", PORT_ACT_AVP_CLOAK, false, false, "Cloak"));
+    tc->addControl(new touchcontrols::Button("cycle_vision", touchcontrols::RectF(16, 3, 18, 5), "goggles", PORT_ACT_AVP_CYCLE_VISION, false, false, "Cycle vision mode"));
     // Zoom is a 4-level stepped range, so slide up/down rather than two buttons.
-    touchcontrols::QuadSlide *zoomQs = new touchcontrols::QuadSlide("quad_slide_zoom", touchcontrols::RectF(19, 10, 21, 12), "binocular", "slide_arrow",
+    touchcontrols::QuadSlide *zoomQs = new touchcontrols::QuadSlide("quad_slide_zoom", touchcontrols::RectF(14, 3, 16, 5), "binocular", "slide_arrow",
                                                                    PORT_ACT_AVP_ZOOM_IN, 0, PORT_ACT_AVP_ZOOM_OUT, 0, false, "Zoom in/out");
     zoomQs->signal.connect(sigc::mem_fun(this, &TouchInterface::gameButton));
     tc->addControl(zoomQs);
-    tc->addControl(new touchcontrols::Button("recall_disc", touchcontrols::RectF(17, 12, 19, 14), "reload", PORT_ACT_AVP_RECALL_DISC, false, false, "Recall disc"));
+    tc->addControl(new touchcontrols::Button("recall_disc", touchcontrols::RectF(18, 3, 20, 5), "reload", PORT_ACT_AVP_RECALL_DISC, false, false, "Recall disc"));
     // Unhidden by updateSpeciesControls when the level grants it.
-    tc->addControl(new touchcontrols::Button("grapple", touchcontrols::RectF(17, 10, 19, 12), "force_pull", PORT_ACT_AVP_GRAPPLE, false, true, "Grappling hook"));
+    tc->addControl(new touchcontrols::Button("grapple", touchcontrols::RectF(22, 3, 24, 5), "force_pull", PORT_ACT_AVP_GRAPPLE, false, true, "Grappling hook"));
 }
 
 void TouchInterface::addAlienControls(touchcontrols::TouchControls *tc)
 {
-    tc->addControl(new touchcontrols::Button("vision", touchcontrols::RectF(21, 10, 23, 12), "goggles", PORT_ACT_AVP_VISION, false, false, "Alien sense"));
+    tc->addControl(new touchcontrols::Button("vision", touchcontrols::RectF(16, 3, 18, 5), "goggles", PORT_ACT_AVP_VISION, false, false, "Alien sense"));
 }
 
 void TouchInterface::createControls(std::string filesPath)
 {
     tcMenuMain = new touchcontrols::TouchControls("menu", false, true, 10, false);
     tcYesNo = new touchcontrols::TouchControls("yes_no", false, false);
-    tcGameMarine = new touchcontrols::TouchControls("game_marine", false, true, 1, true);
-    tcGamePredator = new touchcontrols::TouchControls("game_predator", false, true, 1, true);
-    tcGameAlien = new touchcontrols::TouchControls("game_alien", false, true, 1, true);
+    // Marine is the starting screen, so only it is in the editor cycle -
+    // updateSpeciesControls moves that with the active species.
+    tcGameMarine = new touchcontrols::TouchControls("game_marine", false, true, GAME_EDIT_GROUP, true);
+    tcGamePredator = new touchcontrols::TouchControls("game_predator", false, true, -1, true);
+    tcGameAlien = new touchcontrols::TouchControls("game_alien", false, true, -1, true);
     tcGameWeapons = new touchcontrols::TouchControls("weapons", false, true, 1, false);
     tcWeaponWheel = new touchcontrols::TouchControls("weapon_wheel", false, true, 1, false);
     tcBlank = new touchcontrols::TouchControls("blank", true, false);
@@ -321,6 +325,12 @@ void TouchInterface::updateSpeciesControls()
             next = tcGamePredator;
         else if (playerType == AVP_PLAYER_ALIEN)
             next = tcGameAlien;
+
+        // The editor cycles every group with the same editGroup whether it is
+        // enabled or not, so drop the other two species out of the cycle.
+        tcGameMarine->editGroup = (next == tcGameMarine) ? GAME_EDIT_GROUP : -1;
+        tcGamePredator->editGroup = (next == tcGamePredator) ? GAME_EDIT_GROUP : -1;
+        tcGameAlien->editGroup = (next == tcGameAlien) ? GAME_EDIT_GROUP : -1;
 
         if (next != tcGameMain)
         {
