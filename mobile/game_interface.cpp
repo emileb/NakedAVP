@@ -153,13 +153,6 @@ int PortableKeyEvent(int state, int code, int unitcode)
 
 #define ONE_FIXED 65536
 
-// Divisor, so a bigger value moves slower. touch_interface_base.cpp's left
-// stick tops out near +-15 fwd / +-10 strafe at the default sensitivity, and
-// the engine takes this as a direct speed multiplier (keyboard passes 1.0), so
-// saturate a little before the stick edge to make full speed reachable.
-#define FWD_STICK_RANGE    6.0f
-#define STRAFE_STICK_RANGE 4.0f
-
 // Look feeds the engine's mouse path. Mouse scale converts a screen-fraction
 // swipe to mouse pixels; joystick scale goes straight to a mouse velocity,
 // which saturates the turn rate at about 1024 with the default sensitivity.
@@ -194,7 +187,7 @@ static int clampFixed(float v)
 extern "C" void AVP_GetTouchInput(AVP_TouchInput *out)
 {
     out->move = s_moveDigital ? s_moveDigital * ONE_FIXED : clampFixed(s_moveStick);
-    out->strafe = s_strafeDigital ? s_strafeDigital * ONE_FIXED : clampFixed(s_strafeStick);
+    out->strafe = s_strafeDigital ? s_strafeDigital * ONE_FIXED : clampFixed(s_strafeStick / 2);
     out->buttons = s_buttons;
     out->weaponSlot = s_weaponSlot;
 
@@ -304,12 +297,22 @@ void PortableMove(float fwd, float strafe)
 
 void PortableMoveFwd(float fwd)
 {
-    s_moveStick = fwd / FWD_STICK_RANGE;
+    if(fwd > 1)
+        fwd = 1;
+    else if(fwd < -1)
+        fwd = -1;
+
+    s_moveStick = fwd;
 }
 
 void PortableMoveSide(float strafe)
 {
-    s_strafeStick = strafe / STRAFE_STICK_RANGE;
+    if (strafe > 1)
+        strafe = 1;
+    else if (strafe < -1)
+        strafe = -1;
+
+    s_strafeStick = strafe;
 }
 
 void PortableLookPitch(int mode, float pitch)
