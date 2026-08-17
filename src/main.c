@@ -1335,6 +1335,23 @@ void CheckForWindowsMessages()
 			handle_keypress(KeySymToKey(sym), 0, press);
 		}
 	}
+
+	// Fire/Use also count as "any key", so the FMVs, the loading screen's
+	// press-any-key and the death/level-end screens take the touch buttons.
+	// Debounced against the previous frame like a real key, so one already held
+	// when the screen appears does not dismiss it instantly.
+	{
+		static int touchAnyKeyWasDown;
+		int touchAnyKeyDown = AVP_TouchAnyKeyDown();
+
+		if (touchAnyKeyDown) {
+			GotAnyKey = 1;
+			if (!touchAnyKeyWasDown)
+				DebouncedGotAnyKey = 1;
+		}
+
+		touchAnyKeyWasDown = touchAnyKeyDown;
+	}
 #endif
 
 	buttons = SDL_GetRelativeMouseState(&x, &y);

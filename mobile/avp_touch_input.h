@@ -65,6 +65,10 @@ int AVP_GetPlayerType(void);
 // AVP_ABILITY_* the current level grants.
 unsigned int AVP_GetPlayerAbilities(void);
 
+// Non-zero while a fire or use touch button is held, so the press-any-key
+// screens and the FMVs can be dismissed without the Back button.
+int AVP_TouchAnyKeyDown(void);
+
 #ifdef __cplusplus
 }
 #endif

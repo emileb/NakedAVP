@@ -196,6 +196,11 @@ extern "C" void AVP_GetTouchInput(AVP_TouchInput *out)
     s_weaponSlot = 0;
 }
 
+extern "C" int AVP_TouchAnyKeyDown(void)
+{
+    return (s_buttons & (AVP_TOUCH_ATTACK | AVP_TOUCH_ALT_ATTACK | AVP_TOUCH_OPERATE)) != 0;
+}
+
 extern "C" void AVP_GetTouchLook(float *yawMouse, float *pitchMouse, float *yawJoy, float *pitchJoy)
 {
     *yawMouse = -s_yawMouse;
