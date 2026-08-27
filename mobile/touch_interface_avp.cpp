@@ -81,11 +81,6 @@ void TouchInterface::addBaseGameControls(touchcontrols::TouchControls *tc)
     left->registerTouchJoySWAPFIX(right);
     right->registerTouchJoySWAPFIX(left);
 
-    // The base keeps one pair of stick pointers to apply its settings to;
-    // updateSpeciesControls repoints them when the active screen changes.
-    touchJoyLeft = left;
-    touchJoyRight = right;
-
     tc->signal_button.connect(sigc::mem_fun(this, &TouchInterface::gameButton));
     tc->signal_settingsButton.connect(sigc::mem_fun(this, &TouchInterface::gameSettingsButton));
 }
@@ -176,7 +171,9 @@ void TouchInterface::createControls(std::string filesPath)
     addAlienControls(tcGameAlien);
     addBaseGameControls(tcGameAlien);
 
-    tcGameMain = tcGameMarine;
+    // Marine is the starting species. This also points the base's stick
+    // pointers at its screen, which is all the base ever applies settings to.
+    setActiveSpecies(tcGameMarine);
 
     //Weapons -------------------------------------------
     //------------------------------------------------------
@@ -308,6 +305,64 @@ void TouchInterface::createControls(std::string filesPath)
 }
 
 //
+// Makes one species' screen the active one. The base only ever applies its
+// settings to tcGameMain and to the two stick pointers, so everything it would
+// have done at startup or on a settings change has to be redone here.
+//
+void TouchInterface::setActiveSpecies(touchcontrols::TouchControls *tc)
+{
+    tcGameMain = tc;
+
+    tcGameMain->setAlpha(touchSettings.alpha);
+    tcGameMain->setColour(touchSettings.defaultColor);
+
+    touchJoyLeft = (touchcontrols::TouchJoy *) tcGameMain->getControl("stick");
+    touchJoyRight = (touchcontrols::TouchJoy *) tcGameMain->getControl("touch");
+
+    if (touchJoyLeft)
+    {
+        touchJoyLeft->setCenterAnchor(touchSettings.fixedMoveStick);
+        touchJoyLeft->setHideGraphics(!touchSettings.showLeftStick);
+    }
+
+    if (touchJoyRight)
+        touchJoyRight->setHideGraphics(!touchSettings.showRightStick);
+}
+
+//
+// One save file per species screen, since the base only knows about tcGameMain.
+// A preset saved before these existed just has no species files, and the base's
+// tcGameMain.xml load stands.
+//
+bool TouchInterface::saveControlSettings(std::string path)
+{
+    TouchInterfaceBase::saveControlSettings(path);
+
+    tcGameMarine->saveXML(path + "/tcGameMarine.xml");
+    tcGamePredator->saveXML(path + "/tcGamePredator.xml");
+    tcGameAlien->saveXML(path + "/tcGameAlien.xml");
+
+    return false;
+}
+
+bool TouchInterface::loadControlSettings(std::string path)
+{
+    TouchInterfaceBase::loadControlSettings(path);
+
+    loadSpeciesXML(tcGameMarine, path + "/tcGameMarine.xml");
+    loadSpeciesXML(tcGamePredator, path + "/tcGamePredator.xml");
+    loadSpeciesXML(tcGameAlien, path + "/tcGameAlien.xml");
+
+    return false;
+}
+
+void TouchInterface::loadSpeciesXML(touchcontrols::TouchControls *tc, std::string file)
+{
+    tc->loadXML(file);
+    tc->save(); // Save the newly loaded
+}
+
+//
 // Points tcGameMain at the current species' screen. Everything else - fading,
 // alpha, hiding for menus - is the base class's job and keeps working because
 // it only ever looks at tcGameMain.
@@ -340,21 +395,8 @@ void TouchInterface::updateSpeciesControls()
             tcGamePredator->setEnabled(false);
             tcGameAlien->setEnabled(false);
 
-            tcGameMain = next;
-            tcGameMain->setAlpha(touchSettings.alpha);
+            setActiveSpecies(next);
             tcGameMain->setEnabled(wasEnabled);
-
-            touchJoyLeft = (touchcontrols::TouchJoy *) tcGameMain->getControl("stick");
-            touchJoyRight = (touchcontrols::TouchJoy *) tcGameMain->getControl("touch");
-
-            if (touchJoyLeft)
-            {
-                touchJoyLeft->setCenterAnchor(touchSettings.fixedMoveStick);
-                touchJoyLeft->setHideGraphics(!touchSettings.showLeftStick);
-            }
-
-            if (touchJoyRight)
-                touchJoyRight->setHideGraphics(!touchSettings.showRightStick);
         }
 
         lastPlayerType = playerType;
