@@ -1128,6 +1128,16 @@ char ShiftDown = 0;
 char CapsLockOn = 0;
 const char ShiftAddition[2] = { 32, 0 };
 
+#if defined(__ANDROID__)
+// Characters arrive as SDL_EVENT_TEXT_INPUT - the touch keyboard and the IME
+// both feed it - so deriving them from key events as well types everything
+// twice. That path also gets case and shifted symbols right, which this one
+// does not.
+#define AddTypedChar(c) ((void) (c))
+#else
+#define AddTypedChar(c) RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(c)
+#endif
+
 static void handle_keypress(int key, int unicode, int press)
 {	
 	if (key == -1)
@@ -1142,15 +1152,15 @@ static void handle_keypress(int key, int unicode, int press)
 	else if (press) {
 		if ((key >= KEY_A) && (key <= KEY_Z))
 		{
-			RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(65 + (key - KEY_A) + ShiftAddition[ShiftDown ^ CapsLockOn]);
+			AddTypedChar(65 + (key - KEY_A) + ShiftAddition[ShiftDown ^ CapsLockOn]);
 		}
 		else if ((key >= KEY_0) && (key <= KEY_9))
 		{
-			RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(48 + (key - KEY_0)); /* TODO: Shift numbers -> symbols */
+			AddTypedChar(48 + (key - KEY_0)); /* TODO: Shift numbers -> symbols */
 		}
 		else if ((key >= KEY_NUMPAD0) && (key <= KEY_NUMPAD9))
 		{
-			RE_ENTRANT_QUEUE_WinProc_AddMessage_WM_CHAR(48 + (key - KEY_NUMPAD0));
+			AddTypedChar(48 + (key - KEY_NUMPAD0));
 		}
 		else if (false) /* TODO: other symbols */
 		{
